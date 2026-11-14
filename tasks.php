@@ -1,8 +1,9 @@
 <?php
 // tasks.php
-require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/auth.php';
 requireLogin();
 
+$user = currentUser();
 $uid = (int)$user['id'];
 
 // ============ PROSES TAMBAH ============
@@ -87,6 +88,9 @@ function deadlineLabel($t) {
     if ($days === 1) return '⏰ Besok';
     return '📅 ' . $days . ' hari lagi';
 }
+
+// LOAD HEADER
+require_once __DIR__ . '/includes/header.php';
 ?>
 
 <style>
@@ -324,7 +328,7 @@ function deadlineLabel($t) {
             <div class="grid grid-cols-2 gap-4 mb-4">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Diberikan Oleh</label>
-                    <input type="text" name="teacher_name" id="form-teacher" placeholder="Nama guru" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-primary outline-none">
+                    <input type="text" name="teacher_name" id="form-teacher" placeholder="Nama pembimbing" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-primary outline-none">
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Deadline</label>

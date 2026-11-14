@@ -1,8 +1,9 @@
 <?php
 // dashboard.php
-require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/auth.php';
 requireLogin();
 
+$user = currentUser();
 $uid = (int)$user['id'];
 $today = date('Y-m-d');
 $nowHour = (int)date('H');
@@ -40,9 +41,12 @@ if ($isPembimbing):
         ORDER BY j.created_at DESC LIMIT 5
     ")->fetchAll();
 
-    $persenHadir = $totalSiswa > 0 ? round(($totalHadir / $totalSiswa) * 100) : 0;
+        $persenHadir = $totalSiswa > 0 ? round(($totalHadir / $totalSiswa) * 100) : 0;
+
+    // LOAD HEADER
+    require_once __DIR__ . '/includes/header.php';
 ?>
-<div class="relative bg-gradient-to-br from-amber-500 via-orange-500 to-red-500 rounded-2xl shadow-lg p-6 md:p-8 mb-6 overflow-hidden">
+<div class="relative bg-gradient-to-br from-amber-500
     <div class="absolute -top-16 -right-16 w-64 h-64 bg-white/10 rounded-full blur-2xl"></div>
     <div class="absolute top-4 right-6 text-7xl opacity-20 hidden md:block">👨‍🏫</div>
     <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -191,6 +195,9 @@ function labelAbsen($status) {
         'sakit' => 'Sakit', 'alpha' => 'Tidak Hadir', default => 'Belum Absen'
     };
 }
+
+// LOAD HEADER
+require_once __DIR__ . '/includes/header.php';
 ?>
 
 <div class="relative bg-gradient-to-br from-indigo-600 via-indigo-500 to-purple-600 rounded-2xl shadow-lg p-6 md:p-8 mb-6 overflow-hidden">

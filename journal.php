@@ -1,9 +1,11 @@
 <?php
 // journal.php
-require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/auth.php';
 requireLogin();
 
+$user = currentUser();
 $uid = (int)$user['id'];
+$isPembimbing = in_array($user['role'], ['pembimbing','teacher']);
 
 // ============ PROSES TAMBAH ============
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add') {
@@ -18,7 +20,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
             $stmt->execute([$uid, $title, $content, $activity_date]);
             $journal_id = $pdo->lastInsertId();
 
-            // Upload foto
             if (!empty($_FILES['photos']['name'][0])) {
                 if (!is_dir(UPLOAD_DIR)) mkdir(UPLOAD_DIR, 0777, true);
                 $total_files = count($_FILES['photos']['name']);
@@ -44,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
         } catch (Exception $e) {
             $pdo->rollBack();
             setFlash('error', 'Gagal menyimpan jurnal: ' . $e->getMessage());
+            redirect('journal.php');
         }
     }
 }
@@ -73,7 +75,7 @@ if (isset($_GET['delete'])) {
     $stmt->execute([$id]);
     $owner = $stmt->fetchColumn();
 
-    if ($owner == $uid || $user['role'] === 'teacher') {
+    if ($owner == $uid || $isPembimbing) {
         $stmtPhotos = $pdo->prepare("SELECT filename FROM journal_photos WHERE journal_id = ?");
         $stmtPhotos->execute([$id]);
         foreach ($stmtPhotos->fetchAll() as $p) @unlink(UPLOAD_DIR . $p['filename']);
@@ -100,12 +102,10 @@ if ($journals) {
     foreach ($allPhotos as $p) $photosByJournal[$p['journal_id']][] = $p['filename'];
 }
 
-// Statistik
 $totalJournals = count($journals);
 $totalPhotos = array_sum(array_map(fn($p) => count($p), $photosByJournal));
 $myJournals = count(array_filter($journals, fn($j) => $j['user_id'] == $uid));
 
-// Helper: label tanggal
 function relDate($date) {
     $today = date('Y-m-d');
     $yest = date('Y-m-d', strtotime('-1 day'));
@@ -113,6 +113,9 @@ function relDate($date) {
     if ($date === $yest)  return 'Kemarin';
     return tanggalIndo($date);
 }
+
+// ============ LOAD HEADER (SETELAH SEMUA REDIRECT) ============
+require_once __DIR__ . '/includes/header.php';
 ?>
 
 <style>
@@ -128,7 +131,6 @@ function relDate($date) {
     #lightbox { backdrop-filter: blur(8px); }
 </style>
 
-<!-- ============ HEADER ============ -->
 <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
     <div>
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">📸 Jurnal Aktivitas</h1>
@@ -140,7 +142,6 @@ function relDate($date) {
     </button>
 </div>
 
-<!-- ============ STATISTIK ============ -->
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
     <div class="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-100 dark:border-gray-700">
         <div class="flex items-center justify-between mb-1">
@@ -165,7 +166,6 @@ function relDate($date) {
     </div>
 </div>
 
-<!-- ============ FORM TULIS JURNAL ============ -->
 <div id="form-add" class="hidden bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 p-6 mb-6">
     <div class="flex items-center justify-between mb-4 border-b border-gray-100 dark:border-gray-700 pb-3">
         <h3 class="text-lg font-bold text-gray-800 dark:text-white">✍️ Buat Jurnal Baru</h3>
@@ -196,7 +196,6 @@ function relDate($date) {
             <textarea name="content" id="content-input" rows="5" maxlength="2000" placeholder="Ceritakan detail pekerjaan atau kegiatan hari ini..." required class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-primary outline-none resize-none"></textarea>
         </div>
 
-        <!-- Upload Foto -->
         <div class="mb-6">
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Upload Foto</label>
             <div id="drop-zone" class="drop-zone border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 text-center cursor-pointer hover:border-primary transition bg-gray-50 dark:bg-gray-700/30">
@@ -215,20 +214,16 @@ function relDate($date) {
     </form>
 </div>
 
-<!-- ============ PENCARIAN & FILTER ============ -->
 <div class="bg-white dark:bg-gray-800 rounded-xl p-3 mb-6 border border-gray-100 dark:border-gray-700">
     <div class="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-        <!-- Tab -->
         <div class="flex gap-1 bg-gray-100 dark:bg-gray-700 p-1 rounded-lg">
             <button data-tab="all" class="tab-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-white dark:bg-gray-800 text-primary shadow-sm">Semua</button>
             <button data-tab="mine" class="tab-btn px-3 py-1.5 text-xs font-semibold rounded-md text-gray-600 dark:text-gray-300">Saya</button>
         </div>
-        <!-- Pencarian -->
         <div class="flex-1 relative">
             <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
             <input type="text" id="search-input" placeholder="Cari judul atau isi jurnal..." class="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary outline-none dark:text-white">
         </div>
-        <!-- Urutkan -->
         <select id="sort-by" class="px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm dark:text-white outline-none">
             <option value="newest">Terbaru</option>
             <option value="oldest">Terlama</option>
@@ -237,7 +232,6 @@ function relDate($date) {
     </div>
 </div>
 
-<!-- ============ DAFTAR JURNAL ============ -->
 <div id="journal-list" class="space-y-5">
     <?php if (empty($journals)): ?>
         <div class="bg-white dark:bg-gray-800 rounded-2xl p-12 text-center border border-gray-100 dark:border-gray-700">
@@ -251,6 +245,7 @@ function relDate($date) {
     <?php foreach ($journals as $j):
         $isMine = $j['user_id'] == $uid;
         $photos = $photosByJournal[$j['id']] ?? [];
+        $isPembimbingAuthor = in_array($j['role'], ['pembimbing','teacher']);
     ?>
     <div class="journal-card bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden"
          data-title="<?= e(strtolower($j['title'])) ?>"
@@ -259,15 +254,14 @@ function relDate($date) {
          data-photos="<?= count($photos) ?>"
          data-date="<?= $j['activity_date'] ?>">
 
-        <!-- Header: Penulis -->
         <div class="flex items-center gap-3 px-5 pt-4 pb-2">
             <img src="<?= !empty($j['user_photo']) ? UPLOAD_URL.$j['user_photo'] : 'https://ui-avatars.com/api/?name='.urlencode($j['name']).'&background=random&size=44' ?>"
                  class="w-10 h-10 rounded-full object-cover ring-2 ring-indigo-100 dark:ring-indigo-900">
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
                     <span class="font-semibold text-gray-800 dark:text-white text-sm truncate"><?= e($j['name']) ?></span>
-                    <?php if ($j['role'] === 'teacher'): ?>
-                        <span class="text-[10px] bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400 font-bold px-1.5 py-0.5 rounded">GURU</span>
+                    <?php if ($isPembimbingAuthor): ?>
+                        <span class="text-[10px] bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400 font-bold px-1.5 py-0.5 rounded">PEMBIMBING</span>
                     <?php endif; ?>
                     <?php if ($isMine): ?>
                         <span class="text-[10px] bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 font-bold px-1.5 py-0.5 rounded">ANDA</span>
@@ -281,26 +275,26 @@ function relDate($date) {
                 </div>
             </div>
 
-            <?php if ($isMine || $user['role'] === 'teacher'): ?>
+            <?php if ($isMine || $isPembimbing): ?>
             <div class="relative">
                 <button onclick="event.stopPropagation();toggleMenu(<?= $j['id'] ?>)" class="text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 p-1.5 rounded-full">
                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/></svg>
                 </button>
                 <div id="menu-<?= $j['id'] ?>" class="hidden absolute right-0 top-8 bg-white dark:bg-gray-700 rounded-lg shadow-lg border border-gray-200 dark:border-gray-600 overflow-hidden z-10 min-w-[140px]">
+                    <?php if ($isMine): ?>
                     <button onclick="openEditModal(<?= $j['id'] ?>, <?= htmlspecialchars(json_encode(['title'=>$j['title'],'content'=>$j['content']??'','date'=>$j['activity_date']]), ENT_QUOTES) ?>)" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-600 dark:text-gray-200">✏️ Edit</button>
+                    <?php endif; ?>
                     <a href="?delete=<?= $j['id'] ?>" onclick="return confirm('Hapus jurnal ini beserta fotonya?')" class="block px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30">🗑️ Hapus</a>
                 </div>
             </div>
             <?php endif; ?>
         </div>
 
-        <!-- Isi -->
         <div class="px-5 pb-3">
             <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-2"><?= e($j['title']) ?></h3>
             <p class="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap"><?= e($j['content']) ?></p>
         </div>
 
-        <!-- Galeri Foto -->
         <?php if (!empty($photos)): ?>
         <div class="px-5 pb-4">
             <?php
@@ -323,7 +317,6 @@ function relDate($date) {
         </div>
         <?php endif; ?>
 
-        <!-- Keterangan Foto -->
         <div class="px-5 py-3 border-t border-gray-100 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400">
             <?php if (count($photos) > 0): ?>
             <span class="flex items-center gap-1">
@@ -336,7 +329,6 @@ function relDate($date) {
     <?php endforeach; ?>
 </div>
 
-<!-- ============ MODAL EDIT ============ -->
 <div id="edit-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
     <div class="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div class="flex justify-between items-center px-6 py-4 border-b border-gray-100 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
@@ -370,7 +362,6 @@ function relDate($date) {
     </div>
 </div>
 
-<!-- ============ TAMPILAN FOTO BESAR ============ -->
 <div id="lightbox" class="hidden fixed inset-0 bg-black/95 z-[60] items-center justify-center p-4">
     <button onclick="closeLightbox()" class="absolute top-4 right-4 text-white p-2 hover:bg-white/10 rounded-full z-10">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -385,7 +376,6 @@ function relDate($date) {
     <div id="lightbox-counter" class="absolute bottom-4 text-white text-sm bg-black/50 px-3 py-1 rounded-full"></div>
 </div>
 
-<!-- ============ NOTIFIKASI ============ -->
 <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2"></div>
 
 <script>
@@ -393,7 +383,6 @@ let lbImages = [];
 let lbIndex = 0;
 let activeTab = 'all';
 
-// ============ BUKA/TUTUP FORM ============
 function toggleForm() {
     const f = document.getElementById('form-add');
     f.classList.toggle('hidden');
@@ -403,7 +392,6 @@ function toggleForm() {
     }
 }
 
-// ============ HITUNG KARAKTER ============
 const contentInput = document.getElementById('content-input');
 const charCount = document.getElementById('char-count');
 contentInput.addEventListener('input', () => {
@@ -411,7 +399,6 @@ contentInput.addEventListener('input', () => {
     charCount.classList.toggle('text-red-500', contentInput.value.length > 1900);
 });
 
-// ============ PRATINJAU FOTO ============
 const fileInput = document.getElementById('file-input');
 const dropZone = document.getElementById('drop-zone');
 const previewContainer = document.getElementById('preview-container');
@@ -466,7 +453,6 @@ function syncFiles() {
     fileInput.files = dt.files;
 }
 
-// ============ TAB & FILTER ============
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.onclick = () => {
         document.querySelectorAll('.tab-btn').forEach(b => {
@@ -506,7 +492,6 @@ function filterJournals() {
     visible.forEach(c => container.appendChild(c));
 }
 
-// ============ MENU TITIK TIGA ============
 function toggleMenu(id) {
     document.querySelectorAll('[id^="menu-"]').forEach(m => {
         if (m.id !== 'menu-'+id) m.classList.add('hidden');
@@ -519,7 +504,6 @@ document.addEventListener('click', e => {
     }
 });
 
-// ============ MODAL EDIT ============
 function openEditModal(id, data) {
     document.getElementById('edit-id').value = id;
     document.getElementById('edit-title').value = data.title;
@@ -533,7 +517,6 @@ document.getElementById('edit-modal').addEventListener('click', e => {
     if (e.target.id === 'edit-modal') closeEditModal();
 });
 
-// ============ TAMPILAN FOTO BESAR ============
 function openLightbox(images, idx) {
     lbImages = images;
     lbIndex = idx;
@@ -560,12 +543,10 @@ document.addEventListener('keydown', e => {
     if (e.key === 'ArrowRight') navLightbox(1);
 });
 
-// ============ NOTIFIKASI ============
 function showToast(msg, type = 'success') {
     const el = document.createElement('div');
     el.className = `px-4 py-3 rounded-lg shadow-lg text-white font-medium text-sm ${type === 'success' ? 'bg-green-500' : 'bg-red-500'}`;
     el.textContent = msg;
-    el.style.animation = 'fadeIn .3s ease-out';
     document.getElementById('toast-container').appendChild(el);
     setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2500);
 }

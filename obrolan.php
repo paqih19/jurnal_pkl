@@ -1,7 +1,10 @@
 <?php
-require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/auth.php';
 requireLogin();
+
 $user = currentUser();
+
+require_once __DIR__ . '/includes/header.php';
 ?>
 
 <style>
@@ -26,11 +29,23 @@ $user = currentUser();
     .quoted-bar{border-left:4px solid #00a884}
     .room-active{background:#f0f2f5}
     .dark .room-active{background:#2a3942}
+    .attach-img{max-width:260px;max-height:300px;border-radius:8px;cursor:pointer;display:block}
+    .attach-file{display:flex;align-items:center;gap:10px;padding:10px;background:rgba(0,0,0,.05);border-radius:8px;min-width:200px;text-decoration:none;color:inherit;margin-bottom:6px}
+    .dark .attach-file{background:rgba(255,255,255,.08)}
+    .attach-file-icon{width:40px;height:40px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:20px}
+    .attach-file-info{min-width:0;flex:1}
+    .attach-file-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .attach-file-size{font-size:11px;opacity:.6}
+    .upload-overlay{position:absolute;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;border-radius:8px;color:white;font-size:12px}
+    .spinner-sm{border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;width:20px;height:20px;animation:spin 1s linear infinite;display:inline-block}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .caption-text{font-size:13px;margin-top:4px;word-break:break-word}
+    #preview-modal{backdrop-filter:blur(8px)}
 </style>
 
 <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 flex h-[88vh] overflow-hidden relative">
 
-    <!-- ============ SIDEBAR ============ -->
+    <!-- SIDEBAR -->
     <aside id="sidebar" class="w-full md:w-80 shrink-0 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-white dark:bg-[#111b21] absolute md:relative inset-0 z-20 transition-transform">
         <div class="bg-[#008069] dark:bg-[#202c33] text-white p-4">
             <div class="flex items-center justify-between mb-3">
@@ -38,7 +53,7 @@ $user = currentUser();
                     <img src="<?= !empty($user['photo']) ? UPLOAD_URL.$user['photo'] : 'https://ui-avatars.com/api/?name='.urlencode($user['name']).'&background=random&size=40' ?>" class="w-9 h-9 rounded-full object-cover">
                     <div class="min-w-0">
                         <div class="font-bold text-sm truncate"><?= e($user['name']) ?></div>
-                        <div class="text-xs text-emerald-100"><?= $user['role'] === 'teacher' ? 'Guru' : 'Siswa' ?></div>
+                        <div class="text-xs text-emerald-100"><?= in_array($user['role'], ['pembimbing','teacher']) ? 'Pembimbing' : 'Siswa' ?></div>
                     </div>
                 </div>
                 <a href="dashboard.php" class="hover:bg-white/10 p-2 rounded-full" title="Kembali">
@@ -72,7 +87,7 @@ $user = currentUser();
         </div>
     </aside>
 
-    <!-- ============ AREA CHAT ============ -->
+    <!-- AREA CHAT -->
     <div class="flex-1 flex flex-col min-w-0 relative">
         <div class="bg-[#008069] dark:bg-[#202c33] text-white px-4 py-3 flex items-center gap-2 shrink-0 shadow z-10">
             <button onclick="toggleSidebar()" class="md:hidden hover:bg-white/10 p-2 rounded-full">
@@ -93,9 +108,6 @@ $user = currentUser();
             </button>
             <button id="info-btn" class="hover:bg-white/10 p-2 rounded-full" title="Info room">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            </button>
-            <button id="dark-toggle" class="hover:bg-white/10 p-2 rounded-full" title="Mode gelap">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
             </button>
         </div>
 
@@ -152,6 +164,14 @@ $user = currentUser();
             </div>
         </div>
     </div>
+</div>
+
+<!-- PREVIEW IMAGE -->
+<div id="preview-modal" class="hidden fixed inset-0 bg-black/95 z-[60] items-center justify-center p-4">
+    <button onclick="closePreviewImage()" class="absolute top-4 right-4 text-white p-2 hover:bg-white/10 rounded-full z-10">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+    <img id="preview-img" class="max-w-full max-h-full object-contain rounded-lg">
 </div>
 
 <!-- MODAL BUAT GRUP -->
@@ -227,6 +247,29 @@ let allUsers = [];
 
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
+function formatBytes(b){
+    if(!b || b == 0) return '0 B';
+    if(b < 1024) return b + ' B';
+    if(b < 1048576) return (b/1024).toFixed(1) + ' KB';
+    if(b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+    return (b/1073741824).toFixed(2) + ' GB';
+}
+
+function openPreviewImage(src){
+    const modal = document.getElementById('preview-modal');
+    document.getElementById('preview-img').src = src;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+function closePreviewImage(){
+    const modal = document.getElementById('preview-modal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closePreviewImage();
+});
+
 function toggleSidebar(){
     if(window.innerWidth < 768){ sidebar.classList.toggle('hidden'); }
     else { sidebar.classList.toggle('md:w-0'); sidebar.classList.toggle('overflow-hidden'); }
@@ -255,7 +298,7 @@ function showEmptyState(){
 
 async function loadRooms(){
     try{
-        const res = await fetch(BASE_URL+'/api/chat_rooms.php', {credentials:'same-origin'});
+        const res = await fetch(BASE_URL+'/api/obrolan_rooms.php', {credentials:'same-origin'});
         allRooms = await res.json();
         renderRooms();
         return allRooms;
@@ -311,7 +354,7 @@ function switchRoom(id, name, type){
 async function fetchMessages(){
     if(!currentRoomId) return;
     try{
-        const res = await fetch(`${BASE_URL}/api/chat_fetch.php?room_id=${currentRoomId}`, {credentials:'same-origin', cache:'no-store'});
+        const res = await fetch(`${BASE_URL}/api/obrolan_fetch.php?room_id=${currentRoomId}`, {credentials:'same-origin', cache:'no-store'});
         const text = await res.text();
         let messages;
         try { messages = JSON.parse(text); } catch(e){ console.error(text.substring(0,200)); document.getElementById('loading-msg')?.remove(); return; }
@@ -342,7 +385,7 @@ async function fetchMessages(){
             scrollToBottom();
         }
 
-        fetch(`${BASE_URL}/api/chat_mark_read.php`, {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({room_id: currentRoomId})});
+        fetch(`${BASE_URL}/api/obrolan_mark_read.php`, {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({room_id: currentRoomId})});
         loadRooms();
     }catch(e){ console.error(e); document.getElementById('loading-msg')?.remove(); }
 }
@@ -380,11 +423,50 @@ function renderMessage(msg, prevSender){
     }
 
     let contentHtml = '';
-    if(msg.deleted_at){ contentHtml = `<i class="text-gray-500 text-sm">🚫 Pesan telah dihapus</i>`; }
-    else if(msg.attachment_type === 'image'){ contentHtml = `<img src="${esc(msg.attachment)}" class="rounded max-w-[240px] max-h-[280px] cursor-pointer mb-1" onclick="window.open('${esc(msg.attachment)}')">`; if(msg.content) contentHtml += `<div class="whitespace-pre-wrap break-words">${esc(msg.content)}</div>`; }
-    else if(msg.attachment_type === 'audio'){ contentHtml = `<audio controls src="${esc(msg.attachment)}" class="max-w-[220px] h-8"></audio>`; }
-    else if(msg.attachment_type === 'file'){ contentHtml = `<a href="${esc(msg.attachment)}" target="_blank" class="flex items-center gap-2 p-2 bg-black/5 rounded mb-1"><svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg><div class="min-w-0"><div class="truncate text-sm font-medium">${esc(msg.file_name||'file')}</div></div></a>`; }
-    else { contentHtml = `<div class="whitespace-pre-wrap break-words pr-14">${esc(msg.content)}</div>`; }
+    if(msg.deleted_at){
+        contentHtml = `<i class="text-gray-500 text-sm">🚫 Pesan telah dihapus</i>`;
+    }
+    else if(msg.attachment_type === 'image'){
+        contentHtml = `
+            <div class="relative">
+                <img src="${esc(msg.attachment)}" class="attach-img" onclick="openPreviewImage('${esc(msg.attachment)}')" loading="lazy">
+            </div>`;
+        if(msg.content) contentHtml += `<div class="caption-text">${esc(msg.content)}</div>`;
+    }
+    else if(msg.attachment_type === 'audio'){
+        contentHtml = `
+            <div class="flex items-center gap-2 bg-black/5 dark:bg-white/10 rounded-lg p-2 mb-1">
+                <div class="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white">🎤</div>
+                <audio controls src="${esc(msg.attachment)}" class="h-8" style="max-width:200px"></audio>
+            </div>`;
+        if(msg.content) contentHtml += `<div class="caption-text">${esc(msg.content)}</div>`;
+    }
+    else if(msg.attachment_type === 'file'){
+        const ext = (msg.file_name || '').split('.').pop().toLowerCase();
+        const fileIcons = {
+            'pdf': ['📄', '#ef4444'],
+            'doc': ['📝', '#3b82f6'], 'docx': ['📝', '#3b82f6'],
+            'xls': ['📊', '#22c55e'], 'xlsx': ['📊', '#22c55e'],
+            'ppt': ['📽️', '#f97316'], 'pptx': ['📽️', '#f97316'],
+            'zip': ['🗜️', '#a855f7'], 'rar': ['🗜️', '#a855f7'],
+            'txt': ['📃', '#6b7280'], 'csv': ['📊', '#22c55e']
+        };
+        const [icon, color] = fileIcons[ext] || ['📎', '#6b7280'];
+
+        contentHtml = `
+            <a href="${esc(msg.attachment)}" download="${esc(msg.file_name)}" class="attach-file">
+                <div class="attach-file-icon" style="background:${color}20;color:${color}">${icon}</div>
+                <div class="attach-file-info">
+                    <div class="attach-file-name">${esc(msg.file_name || 'file')}</div>
+                    <div class="attach-file-size">${formatBytes(msg.file_size)}</div>
+                </div>
+                <svg class="w-5 h-5 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            </a>`;
+        if(msg.content) contentHtml += `<div class="caption-text">${esc(msg.content)}</div>`;
+    }
+    else {
+        contentHtml = `<div class="whitespace-pre-wrap break-words pr-14">${esc(msg.content)}</div>`;
+    }
 
     const editedLabel = msg.edited_at ? `<span class="text-[10px] italic text-gray-500 ml-1">(diedit)</span>` : '';
 
@@ -411,7 +493,7 @@ chatForm.addEventListener('submit', async e => {
     if(!content && !editingId) return;
 
     if(editingId){
-        const res = await fetch(BASE_URL+'/api/chat_edit.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({id:editingId, content})});
+        const res = await fetch(BASE_URL+'/api/obrolan_edit.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({id:editingId, content})});
         const r = await res.json();
         if(r.status === 'success'){ editingId = null; chatInput.value=''; chatInput.style.height='auto'; cancelReply(); lastRenderedId=0; chatBox.innerHTML=''; lastDate=null; await fetchMessages(); scrollToBottom(true); }
         return;
@@ -421,7 +503,7 @@ chatForm.addEventListener('submit', async e => {
     try {
         const body = {content, room_id: currentRoomId};
         if(replyTo) body.reply_to_id = replyTo.id;
-        const res = await fetch(BASE_URL+'/api/chat_send.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify(body)});
+        const res = await fetch(BASE_URL+'/api/obrolan_send.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify(body)});
         const r = await res.json();
         if(r.status === 'success'){ chatInput.value=''; chatInput.style.height='auto'; cancelReply(); await fetchMessages(); scrollToBottom(true); }
     } catch(err){ console.error(err); }
@@ -449,7 +531,7 @@ function openMenu(e, msgEl){
     ];
     if(isMine){
         items.push({label:'Edit', icon:'✏️', action: () => { editingId = id; chatInput.value = msgEl.dataset.msgContent; chatInput.focus(); document.getElementById('reply-to-name').textContent = '✏️ Edit'; document.getElementById('reply-to-text').textContent = msgEl.dataset.msgContent; replyPreview.classList.remove('hidden'); }});
-        items.push({label:'Hapus', icon:'🗑️', action: async () => { if(!confirm('Hapus pesan ini?')) return; await fetch(BASE_URL+'/api/chat_delete.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({id})}); lastRenderedId=0; chatBox.innerHTML=''; lastDate=null; await fetchMessages(); }});
+        items.push({label:'Hapus', icon:'🗑️', action: async () => { if(!confirm('Hapus pesan ini?')) return; await fetch(BASE_URL+'/api/obrolan_delete.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({id})}); lastRenderedId=0; chatBox.innerHTML=''; lastDate=null; await fetchMessages(); }});
     }
     let html = items.map((item, i) => `<button class="menu-item w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 dark:text-gray-200" data-idx="${i}">${item.icon} ${item.label}</button>`).join('');
     contextMenu.innerHTML = html;
@@ -476,19 +558,73 @@ document.getElementById('file-doc').onchange = e => uploadFile(e.target.files[0]
 
 async function uploadFile(file, type){
     if(!file || !currentRoomId) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+        alert('File maksimal 10MB');
+        return;
+    }
+
+    const caption = chatInput.value.trim();
+
+    const tempId = 'temp_' + Date.now();
+    const tempHtml = `
+        <div class="flex items-end gap-1.5 max-w-[85%] md:max-w-[65%] ml-auto flex-row-reverse mt-3" id="${tempId}">
+            <div class="relative min-w-0">
+                <div class="relative px-2.5 py-1.5 text-sm rounded-lg shadow-sm bubble-out">
+                    ${type === 'image'
+                        ? `<img src="${URL.createObjectURL(file)}" class="attach-img opacity-70">`
+                        : `<div class="attach-file opacity-70">
+                            <div class="attach-file-icon" style="background:#3b82f620;color:#3b82f6">📎</div>
+                            <div class="attach-file-info">
+                                <div class="attach-file-name">${esc(file.name)}</div>
+                                <div class="attach-file-size">${formatBytes(file.size)}</div>
+                            </div>
+                        </div>`}
+                    ${caption ? `<div class="caption-text">${esc(caption)}</div>` : ''}
+                    <div class="upload-overlay"><div class="spinner-sm"></div></div>
+                </div>
+            </div>
+        </div>`;
+    chatBox.insertAdjacentHTML('beforeend', tempHtml);
+    chatBox.scrollTop = chatBox.scrollHeight;
+
     const fd = new FormData();
     fd.append('file', file);
     fd.append('type', type);
     fd.append('room_id', currentRoomId);
+    if(caption) fd.append('caption', caption);
     if(replyTo) fd.append('reply_to_id', replyTo.id);
+
     document.getElementById('attach-panel').classList.add('hidden');
     sendBtn.disabled = true;
+
     try {
-        const res = await fetch(BASE_URL+'/api/chat_upload.php', {method:'POST', body: fd, credentials:'same-origin'});
+        const res = await fetch(BASE_URL+'/api/obrolan_upload.php', {method:'POST', body: fd, credentials:'same-origin'});
         const r = await res.json();
-        if(r.status === 'success'){ cancelReply(); lastRenderedId=0; chatBox.innerHTML=''; lastDate=null; await fetchMessages(); }
-    } catch(err){ console.error(err); }
-    finally { sendBtn.disabled = false; }
+
+        document.getElementById(tempId)?.remove();
+
+        if(r.status === 'success'){
+            chatInput.value = '';
+            chatInput.style.height = 'auto';
+            cancelReply();
+            lastRenderedId = 0;
+            chatBox.innerHTML = '';
+            lastDate = null;
+            await fetchMessages();
+            scrollToBottom(true);
+        } else {
+            alert('Upload gagal: ' + (r.message || 'Error'));
+        }
+    } catch(err){
+        document.getElementById(tempId)?.remove();
+        console.error(err);
+        alert('Upload error. Cek koneksi.');
+    }
+    finally {
+        sendBtn.disabled = false;
+        chatInput.focus();
+    }
 }
 
 document.getElementById('search-btn').onclick = () => { document.getElementById('search-bar').classList.toggle('hidden'); document.getElementById('search-input').focus(); };
@@ -516,13 +652,13 @@ async function openCreateGroup(){
     const list = document.getElementById('member-list');
     list.innerHTML = '<p class="text-sm text-gray-400 text-center py-2">Memuat...</p>';
     try {
-        const res = await fetch(BASE_URL+'/api/chat_users.php', {credentials:'same-origin'});
+        const res = await fetch(BASE_URL+'/api/obrolan_users.php', {credentials:'same-origin'});
         allUsers = await res.json();
         list.innerHTML = allUsers.map(u => `<label class="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
             <input type="checkbox" value="${u.id}" class="member-check w-4 h-4 text-[#008069] rounded">
             <img src="${esc(u.photo_url)}" class="w-8 h-8 rounded-full object-cover">
             <span class="text-sm font-medium text-gray-800 dark:text-gray-200">${esc(u.name)}</span>
-            <span class="text-xs text-gray-400 ml-auto">${u.role==='teacher'?'Guru':'Siswa'}</span>
+            <span class="text-xs text-gray-400 ml-auto">${(u.role==='teacher'||u.role==='pembimbing')?'Pembimbing':'Siswa'}</span>
         </label>`).join('');
     } catch(e){ list.innerHTML = '<p class="text-sm text-red-500 text-center py-2">Gagal memuat</p>'; }
 }
@@ -534,7 +670,7 @@ async function submitCreateGroup(){
     if(!name){ alert('Nama grup wajib diisi'); return; }
     if(members.length === 0){ alert('Pilih minimal 1 anggota'); return; }
     try {
-        const res = await fetch(BASE_URL+'/api/chat_create_group.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({name, members})});
+        const res = await fetch(BASE_URL+'/api/obrolan_create_group.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({name, members})});
         const r = await res.json();
         if(r.status === 'success'){ closeCreateGroup(); await loadRooms(); switchRoom(r.room_id, name, 'group'); }
         else alert('Gagal: '+(r.message||''));
@@ -546,13 +682,13 @@ async function openNewChat(){
     const list = document.getElementById('users-list');
     list.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">Memuat...</p>';
     try {
-        const res = await fetch(BASE_URL+'/api/chat_users.php', {credentials:'same-origin'});
+        const res = await fetch(BASE_URL+'/api/obrolan_users.php', {credentials:'same-origin'});
         allUsers = await res.json();
         list.innerHTML = allUsers.map(u => `<div onclick="startPrivate(${u.id}, '${esc(u.name)}')" class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
             <img src="${esc(u.photo_url)}" class="w-10 h-10 rounded-full object-cover">
             <div class="flex-1 min-w-0">
                 <div class="font-semibold text-sm text-gray-800 dark:text-white truncate">${esc(u.name)}</div>
-                <div class="text-xs text-gray-400">${u.role==='teacher'?'Guru':'Siswa'}</div>
+                <div class="text-xs text-gray-400">${(u.role==='teacher'||u.role==='pembimbing')?'Pembimbing':'Siswa'}</div>
             </div>
         </div>`).join('');
     } catch(e){ list.innerHTML = '<p class="text-sm text-red-500 text-center py-4">Gagal memuat</p>'; }
@@ -561,7 +697,7 @@ function closeNewChat(){ document.getElementById('new-chat-modal').classList.add
 
 async function startPrivate(userId, name){
     try {
-        const res = await fetch(BASE_URL+'/api/chat_create_private.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({user_id: userId})});
+        const res = await fetch(BASE_URL+'/api/obrolan_create_private.php', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: JSON.stringify({user_id: userId})});
         const r = await res.json();
         if(r.status === 'success'){ closeNewChat(); await loadRooms(); switchRoom(r.room_id, name, 'private'); }
         else alert('Gagal: '+(r.message||''));
@@ -571,12 +707,6 @@ async function startPrivate(userId, name){
 document.getElementById('info-btn').onclick = () => {
     if(!currentRoomId){ return; }
     alert('Room: ' + currentRoomName + ' (' + currentRoomType + ')');
-};
-
-if(localStorage.getItem('chat-theme') === 'dark') document.documentElement.classList.add('dark');
-document.getElementById('dark-toggle').onclick = () => {
-    document.documentElement.classList.toggle('dark');
-    localStorage.setItem('chat-theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
 };
 
 async function init(){

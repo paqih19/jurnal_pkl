@@ -1,8 +1,9 @@
 <?php
 // attendance.php
-require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/auth.php';
 requireLogin();
 
+$user = currentUser();
 $uid = (int)$user['id'];
 $today = date('Y-m-d');
 $isPembimbing = isPembimbing();
@@ -198,6 +199,9 @@ function warnaStatus($s) {
         default => 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
     };
 }
+
+// LOAD HEADER
+require_once __DIR__ . '/includes/header.php';
 ?>
 
 <style>

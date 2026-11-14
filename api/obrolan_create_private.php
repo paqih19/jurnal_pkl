@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../includes/notifications.php';
 header('Content-Type: application/json');
 if (empty($_SESSION['user_id'])) { echo json_encode(['status'=>'error','message'=>'Unauthorized']); exit; }
 
@@ -11,7 +12,6 @@ $otherId = (int)($in['user_id'] ?? 0);
 if (!$otherId || $otherId === $uid) { echo json_encode(['status'=>'error','message'=>'User invalid']); exit; }
 
 try {
-    // Cek apakah sudah ada room private antara mereka
     $stmt = $pdo->prepare("
         SELECT r.id FROM chat_rooms r
         WHERE r.type = 'private'
@@ -27,7 +27,6 @@ try {
         exit;
     }
 
-    // Buat baru
     $pdo->beginTransaction();
     $stmt = $pdo->prepare("INSERT INTO chat_rooms (name, type, created_by, created_at) VALUES (NULL, 'private', ?, NOW())");
     $stmt->execute([$uid]);
@@ -38,6 +37,18 @@ try {
     $stmt->execute([$roomId, $otherId]);
 
     $pdo->commit();
+
+    // Notif ke lawan bicara
+    try {
+        $stmtUser = $pdo->prepare("SELECT name FROM users WHERE id = ?");
+        $stmtUser->execute([$uid]);
+        $senderName = $stmtUser->fetchColumn() ?: 'Seseorang';
+        createNotification($pdo, $otherId, 'chat',
+            "💬 {$senderName} ingin mengobrol denganmu",
+            'Buka obrolan untuk balas',
+            'obrolan.php');
+    } catch (Exception $e) {}
+
     echo json_encode(['status'=>'success','room_id'=>$roomId]);
 } catch (Exception $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();

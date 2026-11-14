@@ -2,10 +2,12 @@
 // includes/header.php
 if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/notifications.php';
 $user = currentUser();
 $flash = getFlash();
 $currentPage = basename($_SERVER['PHP_SELF']);
 $unreadChat = isLoggedIn() ? unreadChatCount() : 0;
+$unreadNotif = isLoggedIn() ? unreadNotifCount($pdo, (int)$user['id']) : 0;
 $isPembimbing = isPembimbing();
 
 $pageTitles = [
@@ -19,7 +21,6 @@ $pageTitles = [
 ];
 $pageTitle = $pageTitles[$currentPage] ?? APP_NAME;
 
-// Menu Desktop
 $menus = $isPembimbing ? [
     'dashboard.php'   => ['Dashboard',  '🏠'],
     'monitoring.php'  => ['Monitoring', '📊'],
@@ -35,7 +36,6 @@ $menus = $isPembimbing ? [
     'attendance.php'  => ['Absensi',    '✅'],
 ];
 
-// Menu Mobile = menu desktop + profil
 $menusMobile = $menus;
 $menusMobile['profile.php'] = ['Profil', '👤'];
 
@@ -56,12 +56,7 @@ $mobileActiveClass = $isPembimbing ? 'nav-active-pembimbing' : 'nav-active';
             theme: {
                 extend: {
                     fontFamily: { sans: ['Inter', 'sans-serif'] },
-                    colors: {
-                        primary: '#4F46E5',
-                        'primary-dark': '#4338CA',
-                        'brand-purple': '#7C3AED',
-                        'wa-green': '#008069',
-                    },
+                    colors: { primary: '#4F46E5', 'primary-dark': '#4338CA', 'brand-purple': '#7C3AED' },
                 }
             }
         }
@@ -74,6 +69,8 @@ $mobileActiveClass = $isPembimbing ? 'nav-active-pembimbing' : 'nav-active';
         .dark .nav-active-pembimbing { background: linear-gradient(135deg,rgba(245,158,11,.15),rgba(249,115,22,.15)); color:#FBBF24; }
         ::-webkit-scrollbar { width:8px; height:8px; }
         ::-webkit-scrollbar-thumb { background: linear-gradient(180deg,#6366f1,#a855f7); border-radius:4px; }
+        @keyframes pulseBadge { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+        .badge-pulse { animation: pulseBadge 1.5s infinite; }
     </style>
 </head>
 <body class="bg-gray-50 dark:bg-slate-900 text-gray-800 dark:text-gray-100 font-sans antialiased flex flex-col min-h-screen">
@@ -100,12 +97,33 @@ $mobileActiveClass = $isPembimbing ? 'nav-active-pembimbing' : 'nav-active';
                     <?php endforeach; ?>
                 </div>
 
-                <div class="flex items-center gap-2 shrink-0">
+                <div class="flex items-center gap-1 shrink-0">
+
+                    <!-- NOTIFIKASI BELL -->
+                    <div class="relative" id="notif-wrapper">
+                        <button onclick="toggleNotif()" id="notif-btn" class="text-gray-500 dark:text-gray-400 hover:text-primary p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition relative">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+                            <span id="notif-badge" class="<?= $unreadNotif > 0 ? '' : 'hidden' ?> absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center px-1 rounded-full badge-pulse"><?= $unreadNotif > 99 ? '99+' : $unreadNotif ?></span>
+                        </button>
+
+                        <div id="notif-dropdown" class="hidden absolute right-0 top-12 w-80 sm:w-96 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-slate-700 overflow-hidden z-50">
+                            <div class="flex items-center justify-between px-4 py-3 bg-gradient-to-r <?= $isPembimbing ? 'from-amber-500 to-orange-500' : 'from-primary to-purple-600' ?> text-white">
+                                <h3 class="font-bold text-sm">🔔 Notifikasi</h3>
+                                <button onclick="markAllRead()" class="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded transition">Tandai semua</button>
+                            </div>
+                            <div id="notif-list" class="max-h-96 overflow-y-auto">
+                                <div class="p-6 text-center text-gray-400 text-sm"><div class="text-3xl mb-2">📭</div>Memuat...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DARK MODE -->
                     <button id="theme-toggle" class="text-gray-500 dark:text-gray-400 hover:text-primary p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition">
                         <svg class="w-5 h-5 theme-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
                         <svg class="w-5 h-5 theme-icon-sun hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
                     </button>
 
+                    <!-- USER MENU -->
                     <div class="hidden md:block relative">
                         <button onclick="toggleUserMenu()" id="user-menu-btn" class="flex items-center gap-2 p-1.5 pr-3 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition">
                             <img src="<?= avatarUrl($user['photo'], $user['name'], 40) ?>" class="w-9 h-9 rounded-full object-cover ring-2 <?= $isPembimbing ? 'ring-amber-100 dark:ring-amber-900' : 'ring-indigo-100 dark:ring-indigo-900' ?>">
@@ -115,7 +133,6 @@ $mobileActiveClass = $isPembimbing ? 'nav-active-pembimbing' : 'nav-active';
                             </div>
                             <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                         </button>
-
                         <div id="user-menu" class="hidden absolute right-0 top-14 w-64 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-gray-100 dark:border-slate-700 overflow-hidden z-50">
                             <div class="px-4 py-4 <?= $isPembimbing ? 'bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30' : 'bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/30 dark:to-purple-900/30' ?> border-b border-gray-100 dark:border-slate-700">
                                 <div class="flex items-center gap-3">
@@ -133,7 +150,7 @@ $mobileActiveClass = $isPembimbing ? 'nav-active-pembimbing' : 'nav-active';
                         </div>
                     </div>
 
-                    <a href="<?= BASE_URL ?>/logout.php" class="md:hidden bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-3 py-2 rounded-lg text-xs font-semibold">Keluar</a>
+                    <a href="<?= BASE_URL ?>/logout.php" class="md:hidden bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-2 rounded-lg text-xs font-semibold">Keluar</a>
 
                     <button id="mobile-toggle" class="md:hidden text-gray-600 dark:text-gray-300 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 relative">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -206,6 +223,103 @@ $mobileActiveClass = $isPembimbing ? 'nav-active-pembimbing' : 'nav-active';
                 s.classList.toggle('hidden', !isDark);
             }
         })();
+
+        // ============ NOTIFIKASI ============
+        let notifOpen = false;
+
+        function toggleNotif() {
+            const dd = document.getElementById('notif-dropdown');
+            notifOpen = !notifOpen;
+            dd.classList.toggle('hidden', !notifOpen);
+            if (notifOpen) loadNotifications();
+        }
+
+        function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+        async function loadNotifications() {
+            try {
+                const res = await fetch('<?= BASE_URL ?>/api/notif_fetch.php', {credentials: 'same-origin'});
+                const data = await res.json();
+                const list = document.getElementById('notif-list');
+                const badge = document.getElementById('notif-badge');
+
+                if (data.unread > 0) {
+                    badge.textContent = data.unread > 99 ? '99+' : data.unread;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+
+                if (!data.items || data.items.length === 0) {
+                    list.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm"><div class="text-3xl mb-2">📭</div>Tidak ada notifikasi</div>';
+                    return;
+                }
+
+                const icons = {'task':'📋','journal':'📝','attendance':'✅','chat':'💬','group':'👥','system':'🔔'};
+
+                list.innerHTML = data.items.map(n => {
+                    const icon = icons[n.type] || '🔔';
+                    const bg = n.is_read ? 'bg-white dark:bg-slate-800' : 'bg-indigo-50 dark:bg-indigo-900/20';
+                    const link = n.link ? `onclick="openNotif(${n.id}, '${n.link}')"` : `onclick="markRead(${n.id})"`;
+                    return `<div class="px-4 py-3 border-b border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700/50 cursor-pointer ${bg}" ${link}>
+                        <div class="flex items-start gap-3">
+                            <div class="text-2xl shrink-0">${icon}</div>
+                            <div class="min-w-0 flex-1">
+                                <div class="text-sm font-semibold text-gray-800 dark:text-white ${n.is_read ? 'opacity-70' : ''}">${esc(n.title)}</div>
+                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${esc(n.message || '')}</div>
+                                <div class="text-[10px] text-gray-400 mt-1">${n.time_ago}</div>
+                            </div>
+                            ${!n.is_read ? '<div class="w-2 h-2 bg-indigo-500 rounded-full shrink-0 mt-2"></div>' : ''}
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (err) { console.error(err); }
+        }
+
+        async function markRead(id) {
+            await fetch('<?= BASE_URL ?>/api/notif_read.php', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin', body: JSON.stringify({id})
+            });
+            loadNotifications();
+        }
+
+        function openNotif(id, link) {
+            markRead(id);
+            if (link) setTimeout(() => window.location.href = '<?= BASE_URL ?>/' + link, 200);
+        }
+
+        async function markAllRead() {
+            await fetch('<?= BASE_URL ?>/api/notif_read.php', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin', body: JSON.stringify({all: true})
+            });
+            loadNotifications();
+        }
+
+        document.addEventListener('click', e => {
+            const wrapper = document.getElementById('notif-wrapper');
+            if (wrapper && !wrapper.contains(e.target) && notifOpen) {
+                document.getElementById('notif-dropdown').classList.add('hidden');
+                notifOpen = false;
+            }
+        });
+
+        setInterval(() => {
+            if (notifOpen) loadNotifications();
+            else {
+                fetch('<?= BASE_URL ?>/api/notif_fetch.php', {credentials: 'same-origin'})
+                    .then(r => r.json())
+                    .then(data => {
+                        const badge = document.getElementById('notif-badge');
+                        if (data.unread > 0) {
+                            badge.textContent = data.unread > 99 ? '99+' : data.unread;
+                            badge.classList.remove('hidden');
+                        } else badge.classList.add('hidden');
+                    }).catch(() => {});
+            }
+        }, 15000);
+
         window.showToast = function(msg, type = 'success') {
             const el = document.createElement('div');
             const color = type === 'success' ? 'bg-green-500' : (type === 'error' ? 'bg-red-500' : 'bg-indigo-500');
