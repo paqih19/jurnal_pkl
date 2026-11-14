@@ -11,13 +11,36 @@ $isPembimbing = isPembimbing();
 $pageTitles = [
     'dashboard.php'   => 'Dashboard',
     'monitoring.php'  => 'Monitoring',
-    'chat.php'        => 'Chat',
+    'obrolan.php'     => 'Obrolan',
     'tasks.php'       => 'Tugas',
     'journal.php'     => 'Jurnal',
     'attendance.php'  => 'Absensi',
     'profile.php'     => 'Profil',
 ];
 $pageTitle = $pageTitles[$currentPage] ?? APP_NAME;
+
+// Menu Desktop
+$menus = $isPembimbing ? [
+    'dashboard.php'   => ['Dashboard',  '🏠'],
+    'monitoring.php'  => ['Monitoring', '📊'],
+    'obrolan.php'     => ['Obrolan',    '💬'],
+    'tasks.php'       => ['Tugas',      '📋'],
+    'journal.php'     => ['Jurnal',     '📝'],
+    'attendance.php'  => ['Absensi',    '✅'],
+] : [
+    'dashboard.php'   => ['Dashboard',  '🏠'],
+    'obrolan.php'     => ['Obrolan',    '💬'],
+    'tasks.php'       => ['Tugas',      '📋'],
+    'journal.php'     => ['Jurnal',     '📝'],
+    'attendance.php'  => ['Absensi',    '✅'],
+];
+
+// Menu Mobile = menu desktop + profil
+$menusMobile = $menus;
+$menusMobile['profile.php'] = ['Profil', '👤'];
+
+$activeClassMap = $isPembimbing ? 'nav-active-pembimbing shadow-sm' : 'nav-active shadow-sm';
+$mobileActiveClass = $isPembimbing ? 'nav-active-pembimbing' : 'nav-active';
 ?>
 <!DOCTYPE html>
 <html lang="id" class="scroll-smooth">
@@ -44,7 +67,6 @@ $pageTitle = $pageTitles[$currentPage] ?? APP_NAME;
         }
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?= BASE_URL ?>/assets/css/style.css">
     <style>
         .nav-active { background: linear-gradient(135deg,#EEF2FF,#F5F3FF); color:#4F46E5; font-weight:600; }
         .dark .nav-active { background: linear-gradient(135deg,rgba(99,102,241,.15),rgba(139,92,246,.15)); color:#A5B4FC; }
@@ -66,26 +88,10 @@ $pageTitle = $pageTitles[$currentPage] ?? APP_NAME;
                 </a>
 
                 <div class="hidden md:flex items-center gap-1 flex-1 justify-center">
-                    <?php
-                    $menus = $isPembimbing ? [
-                        'dashboard.php'   => ['Dashboard',  '🏠'],
-                        'monitoring.php'  => ['Monitoring', '📊'],
-                        'chat.php'        => ['Chat',       '💬'],
-                        'tasks.php'       => ['Tugas',      '📋'],
-                        'journal.php'     => ['Jurnal',     '📝'],
-                        'attendance.php'  => ['Absensi',    '✅'],
-                    ] : [
-                        'dashboard.php'   => ['Dashboard',  '🏠'],
-                        'chat.php'        => ['Chat',       '💬'],
-                        'tasks.php'       => ['Tugas',      '📋'],
-                        'journal.php'     => ['Jurnal',     '📝'],
-                        'attendance.php'  => ['Absensi',    '✅'],
-                    ];
-                    $activeClassMap = $isPembimbing ? 'nav-active-pembimbing shadow-sm' : 'nav-active shadow-sm';
-                    foreach ($menus as $file => $data):
+                    <?php foreach ($menus as $file => $data):
                         $isActive = ($currentPage === $file);
                         $activeClass = $isActive ? $activeClassMap : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700';
-                        $badge = ($file === 'chat.php' && $unreadChat > 0) ? $unreadChat : 0;
+                        $badge = ($file === 'obrolan.php' && $unreadChat > 0) ? $unreadChat : 0;
                     ?>
                         <a href="<?= BASE_URL ?>/<?= $file ?>" class="px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 relative <?= $activeClass ?>">
                             <span class="text-base"><?= $data[1] ?></span><?= $data[0] ?>
@@ -139,28 +145,10 @@ $pageTitle = $pageTitles[$currentPage] ?? APP_NAME;
 
         <div id="mobile-menu" class="hidden md:hidden border-t border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-800">
             <div class="px-3 py-3 space-y-1">
-                <?php
-                $menusMobile = $isPembimbing ? [
-                    'dashboard.php'   => ['Dashboard',  '🏠'],
-                    'monitoring.php'  => ['Monitoring', '📊'],
-                    'chat.php'        => ['Chat',       '💬'],
-                    'tasks.php'       => ['Tugas',      '📋'],
-                    'journal.php'     => ['Jurnal',     '📝'],
-                    'attendance.php'  => ['Absensi',    '✅'],
-                    'profile.php'     => ['Profil',     '👤'],
-                ] : [
-                    'dashboard.php'   => ['Dashboard',  '🏠'],
-                    'chat.php'        => ['Chat',       '💬'],
-                    'tasks.php'       => ['Tugas',      '📋'],
-                    'journal.php'     => ['Jurnal',     '📝'],
-                    'attendance.php'  => ['Absensi',    '✅'],
-                    'profile.php'     => ['Profil',     '👤'],
-                ];
-                $mobileActive = $isPembimbing ? 'nav-active-pembimbing' : 'nav-active';
-                foreach ($menusMobile as $file => $data):
+                <?php foreach ($menusMobile as $file => $data):
                     $isActive = ($currentPage === $file);
-                    $activeClass = $isActive ? $mobileActive : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700';
-                    $badge = ($file === 'chat.php' && $unreadChat > 0) ? $unreadChat : 0;
+                    $activeClass = $isActive ? $mobileActiveClass : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700';
+                    $badge = ($file === 'obrolan.php' && $unreadChat > 0) ? $unreadChat : 0;
                 ?>
                     <a href="<?= BASE_URL ?>/<?= $file ?>" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition <?= $activeClass ?>">
                         <span class="text-lg"><?= $data[1] ?></span>

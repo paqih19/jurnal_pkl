@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <span class="bg-white/20 backdrop-blur px-3 py-1.5 rounded-full text-xs font-semibold">📝 Jurnal</span>
                 <span class="bg-white/20 backdrop-blur px-3 py-1.5 rounded-full text-xs font-semibold">✅ Absensi</span>
                 <span class="bg-white/20 backdrop-blur px-3 py-1.5 rounded-full text-xs font-semibold">📋 Tugas</span>
-                <span class="bg-white/20 backdrop-blur px-3 py-1.5 rounded-full text-xs font-semibold">💬 Chat</span>
+                <span class="bg-white/20 backdrop-blur px-3 py-1.5 rounded-full text-xs font-semibold">💬 Obrolan</span>
             </div>
         </div>
     </div>

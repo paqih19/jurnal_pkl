@@ -39,17 +39,9 @@ function hasRole($role) {
     return false;
 }
 
-function isTeacher() {
-    return hasRole('pembimbing');
-}
-
-function isPembimbing() {
-    return hasRole('pembimbing');
-}
-
-function isStudent() {
-    return !isPembimbing() && !empty($_SESSION['user_id']);
-}
+function isTeacher() { return hasRole('pembimbing'); }
+function isPembimbing() { return hasRole('pembimbing'); }
+function isStudent() { return !isPembimbing() && !empty($_SESSION['user_id']); }
 
 function currentUser() {
     return [

@@ -10,7 +10,7 @@ $siswa = $pdo->query("
     SELECT u.*,
         (SELECT status FROM attendance WHERE user_id = u.id AND date = '$today' LIMIT 1) AS absen_hari_ini,
         (SELECT COUNT(*) FROM journals WHERE user_id = u.id) AS total_jurnal
-    FROM users u WHERE u.role != 'pembimbing' ORDER BY u.name
+    FROM users u WHERE u.role NOT IN ('pembimbing','teacher') ORDER BY u.name
 ")->fetchAll();
 ?>
 <div class="mb-6">

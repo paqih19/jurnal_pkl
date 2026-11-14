@@ -17,7 +17,7 @@ else                    $greeting = 'Selamat Malam';
 // ============ DASHBOARD PEMBIMBING ==========================
 // ============================================================
 if ($isPembimbing):
-    $totalSiswa = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role != 'pembimbing'")->fetchColumn();
+    $totalSiswa = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role NOT IN ('pembimbing','teacher')")->fetchColumn();
     $stmt = $pdo->prepare("SELECT status, COUNT(*) as jml FROM attendance WHERE date = ? GROUP BY status");
     $stmt->execute([$today]);
     $absenStats = ['hadir'=>0,'izin'=>0,'sakit'=>0,'telat'=>0,'alpha'=>0];
@@ -28,7 +28,7 @@ if ($isPembimbing):
 
     $stmt = $pdo->prepare("
         SELECT u.id, u.name, u.photo FROM users u
-        WHERE u.role != 'pembimbing' AND u.id NOT IN (SELECT user_id FROM attendance WHERE date = ?)
+        WHERE u.role NOT IN ('pembimbing','teacher') AND u.id NOT IN (SELECT user_id FROM attendance WHERE date = ?)
         ORDER BY u.name LIMIT 6
     ");
     $stmt->execute([$today]);
@@ -49,15 +49,10 @@ if ($isPembimbing):
         <div class="text-white">
             <p class="text-amber-100 text-sm mb-1"><?= date('l, d F Y') ?></p>
             <h1 class="text-2xl md:text-3xl font-bold mb-2"><?= $greeting ?>, <?= e($user['name']) ?>! 👋</h1>
-            <p class="text-amber-100 text-sm md:text-base max-w-xl">
-                Ini dashboard <b>monitoring</b> kamu sebagai pembimbing PKL. Pantau aktivitas siswa hari ini.
-            </p>
+            <p class="text-amber-100 text-sm md:text-base max-w-xl">Ini dashboard <b>monitoring</b> kamu sebagai pembimbing PKL. Pantau aktivitas siswa hari ini.</p>
         </div>
         <div class="bg-white/20 backdrop-blur border border-white/30 text-white px-4 py-3 rounded-xl text-sm">
-            <div class="flex items-center gap-2">
-                <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                <span class="font-semibold">👨‍🏫 Mode Pembimbing</span>
-            </div>
+            <div class="flex items-center gap-2"><span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span><span class="font-semibold">👨‍🏫 Mode Pembimbing</span></div>
         </div>
     </div>
 </div>
@@ -136,25 +131,16 @@ if ($isPembimbing):
 </div>
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-    <a href="monitoring.php" class="bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1">
-        <span class="text-2xl">📊</span><span class="text-xs font-bold">Monitoring</span>
-    </a>
-    <a href="tasks.php" class="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1">
-        <span class="text-2xl">📋</span><span class="text-xs font-bold">Buat Tugas</span>
-    </a>
-    <a href="attendance.php" class="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1">
-        <span class="text-2xl">✅</span><span class="text-xs font-bold">Rekap Absen</span>
-    </a>
-    <a href="chat.php" class="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1">
-        <span class="text-2xl">💬</span><span class="text-xs font-bold">Chat</span>
-    </a>
+    <a href="monitoring.php" class="bg-gradient-to-br from-amber-500 to-orange-600 text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1"><span class="text-2xl">📊</span><span class="text-xs font-bold">Monitoring</span></a>
+    <a href="tasks.php" class="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1"><span class="text-2xl">📋</span><span class="text-xs font-bold">Buat Tugas</span></a>
+    <a href="attendance.php" class="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1"><span class="text-2xl">✅</span><span class="text-xs font-bold">Rekap Absen</span></a>
+    <a href="obrolan.php" class="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1"><span class="text-2xl">💬</span><span class="text-xs font-bold">Obrolan</span></a>
 </div>
 
 <?php
 require_once __DIR__ . '/includes/footer.php';
 exit;
 endif;
-
 
 // ============================================================
 // ============ DASHBOARD SISWA ===============================
@@ -237,7 +223,7 @@ function labelAbsen($status) {
                     <div class="bg-yellow-50 dark:bg-yellow-900/30 p-2.5 rounded-lg text-yellow-600">📋</div>
                     <?php if ($total_tugas > 0): ?><span class="bg-red-100 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full"><?= $total_tugas ?> aktif</span><?php endif; ?>
                 </div>
-                <div class="text-3xl font-bold text-gray-800 dark:text-white mb-1"><?= $total_tugas ?></div>
+                <div class="text-3xl font-bold mb-1"><?= $total_tugas ?></div>
                 <div class="text-gray-500 text-sm mb-3">Tugas Belum Selesai</div>
                 <div class="w-full h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden mb-3">
                     <div class="h-full bg-gradient-to-r from-yellow-400 to-yellow-500 rounded-full" style="width:<?= $progress_tugas ?>%"></div>
@@ -257,9 +243,9 @@ function labelAbsen($status) {
                 <div class="flex items-start justify-between mb-3"><div class="bg-blue-50 dark:bg-blue-900/30 p-2.5 rounded-lg text-blue-600">💬</div>
                 <?php if ($unread_chat > 0): ?><span class="absolute top-3 right-3 bg-red-500 text-white text-xs font-bold min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full"><?= $unread_chat > 99 ? '99+' : $unread_chat ?></span><?php endif; ?>
                 </div>
-                <div class="text-3xl font-bold text-gray-800 dark:text-white mb-1"><?= $unread_chat ?></div>
+                <div class="text-3xl font-bold mb-1"><?= $unread_chat ?></div>
                 <div class="text-gray-500 text-sm mb-3">Pesan Belum Dibaca</div>
-                <a href="chat.php" class="inline-block bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-indigo-700">Buka Chat</a>
+                <a href="obrolan.php" class="inline-block bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-indigo-700">Buka Obrolan</a>
             </div>
         </div>
 
@@ -290,7 +276,7 @@ function labelAbsen($status) {
                 ['href'=>'journal.php',    'icon'=>'📝', 'label'=>'Isi Jurnal', 'color'=>'from-blue-500 to-blue-600'],
                 ['href'=>'attendance.php', 'icon'=>'✅', 'label'=>'Absen',      'color'=>'from-green-500 to-green-600'],
                 ['href'=>'tasks.php',      'icon'=>'📋', 'label'=>'Tugas',      'color'=>'from-yellow-500 to-yellow-600'],
-                ['href'=>'chat.php',       'icon'=>'💬', 'label'=>'Chat',       'color'=>'from-purple-500 to-purple-600'],
+                ['href'=>'obrolan.php',    'icon'=>'💬', 'label'=>'Obrolan',    'color'=>'from-purple-500 to-purple-600'],
             ];
             foreach ($quickActions as $qa): ?>
             <a href="<?= $qa['href'] ?>" class="bg-gradient-to-br <?= $qa['color'] ?> text-white rounded-xl p-4 hover:scale-105 transition shadow flex flex-col items-center gap-1">
@@ -330,7 +316,7 @@ function labelAbsen($status) {
                             </div>
                             <div class="min-w-0 flex-1">
                                 <div class="text-xs font-semibold truncate"><?= e($ou['name']) ?></div>
-                                <div class="text-[10px] text-gray-400"><?= $ou['role'] === 'pembimbing' ? 'Pembimbing' : 'Siswa' ?></div>
+                                <div class="text-[10px] text-gray-400"><?= in_array($ou['role'], ['pembimbing','teacher']) ? 'Pembimbing' : 'Siswa' ?></div>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -373,7 +359,7 @@ function labelAbsen($status) {
                     <div class="font-bold text-indigo-800 dark:text-indigo-300 text-xs mb-1">Tips PKL</div>
                     <p class="text-indigo-700 dark:text-indigo-300 text-xs leading-relaxed">
                         <?php
-                        $tips = ['Isi jurnal setiap hari agar tidak lupa detail pekerjaan.', 'Jangan ragu bertanya ke pembimbing jika bingung.', 'Catat setiap tugas yang diberikan, sekecil apapun.', 'Jaga komunikasi baik dengan rekan tim lewat chat.', 'Manfaatkan waktu PKL untuk networking & belajar hal baru.'];
+                        $tips = ['Isi jurnal setiap hari agar tidak lupa detail pekerjaan.', 'Jangan ragu bertanya ke pembimbing jika bingung.', 'Catat setiap tugas yang diberikan, sekecil apapun.', 'Jaga komunikasi baik dengan rekan tim lewat obrolan.', 'Manfaatkan waktu PKL untuk networking & belajar hal baru.'];
                         echo $tips[(int)date('j') % count($tips)];
                         ?>
                     </p>
