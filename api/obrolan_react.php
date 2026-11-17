@@ -1,15 +1,11 @@
-
 <?php
 // api/obrolan_react.php
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
 
 require_once __DIR__ . '/../config/db.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('X-Content-Type-Options: nosniff');
 
 function reactJsonResponse(
     string $status,
@@ -19,17 +15,20 @@ function reactJsonResponse(
 ): never {
     http_response_code($code);
 
-    $response = [
-        'status'  => $status,
-        'message' => $message
-    ];
+    $response = ['status' => $status, 'message' => $message];
 
     if ($action !== null) {
         $response['action'] = $action;
     }
 
-    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
+}
+
+// Hanya POST
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    header('Allow: POST');
+    reactJsonResponse('error', 'Metode request tidak diizinkan.', null, 405);
 }
 
 // Login
@@ -37,28 +36,23 @@ if (empty($_SESSION['user_id'])) {
     reactJsonResponse('error', 'Silakan login terlebih dahulu.', null, 401);
 }
 
-// Hanya POST
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    reactJsonResponse('error', 'Metode request tidak diizinkan.', null, 405);
-}
-
 $uid = (int) $_SESSION['user_id'];
 
-// Ambil JSON
+if ($uid <= 0) {
+    reactJsonResponse('error', 'Sesi pengguna tidak valid.', null, 401);
+}
+
+// Baca input
 $input = json_decode(file_get_contents('php://input'), true);
 
 if (!is_array($input)) {
     reactJsonResponse('error', 'Data request tidak valid.', null, 400);
 }
 
-$messageId = filter_var(
-    $input['message_id'] ?? null,
-    FILTER_VALIDATE_INT
-);
+$messageId = filter_var($input['message_id'] ?? null, FILTER_VALIDATE_INT);
+$emoji     = $input['emoji'] ?? '';
 
-$emoji = $input['emoji'] ?? '';
-
-if (!$messageId || $messageId <= 0 || !is_string($emoji)) {
+if ($messageId === false || $messageId === null || $messageId <= 0 || !is_string($emoji)) {
     reactJsonResponse('error', 'Pesan atau emoji tidak valid.', null, 400);
 }
 
@@ -75,7 +69,7 @@ if (mb_strlen($emoji, 'UTF-8') > 8) {
 try {
     $pdo->beginTransaction();
 
-    // Pastikan pesan ada, belum dihapus, dan user anggota ruang.
+    // Verifikasi pesan + akses
     $checkMessage = $pdo->prepare("
         SELECT m.id
         FROM messages m
@@ -83,103 +77,55 @@ try {
             ON cm.room_id = m.room_id
         WHERE m.id = ?
           AND cm.user_id = ?
-          AND (
-              m.deleted_at IS NULL
-              OR m.deleted_at = ''
-          )
+          AND (m.deleted_at IS NULL OR m.deleted_at = '')
         LIMIT 1
         FOR UPDATE
     ");
-
     $checkMessage->execute([$messageId, $uid]);
 
     if (!$checkMessage->fetchColumn()) {
         $pdo->rollBack();
-
-        reactJsonResponse(
-            'error',
-            'Pesan tidak ditemukan atau akses ditolak.',
-            null,
-            403
-        );
+        reactJsonResponse('error', 'Pesan tidak ditemukan atau akses ditolak.', null, 403);
     }
 
-    // Cek apakah reaksi yang sama sudah ada.
+    // Toggle: cek reaksi existing
     $checkReaction = $pdo->prepare("
-        SELECT 1
-        FROM message_reactions
-        WHERE message_id = ?
-          AND user_id = ?
-          AND emoji = ?
+        SELECT 1 FROM message_reactions
+        WHERE message_id = ? AND user_id = ? AND emoji = ?
         LIMIT 1
     ");
-
-    $checkReaction->execute([
-        $messageId,
-        $uid,
-        $emoji
-    ]);
+    $checkReaction->execute([$messageId, $uid, $emoji]);
 
     if ($checkReaction->fetchColumn()) {
-
-        // Jika sudah ada, hapus reaksi.
+        // Hapus reaksi
         $deleteReaction = $pdo->prepare("
             DELETE FROM message_reactions
-            WHERE message_id = ?
-              AND user_id = ?
-              AND emoji = ?
+            WHERE message_id = ? AND user_id = ? AND emoji = ?
         ");
-
-        $deleteReaction->execute([
-            $messageId,
-            $uid,
-            $emoji
-        ]);
+        $deleteReaction->execute([$messageId, $uid, $emoji]);
 
         $pdo->commit();
 
-        reactJsonResponse(
-            'success',
-            'Reaksi berhasil dihapus.',
-            'removed'
-        );
-
-    } else {
-
-        // Jika belum ada, tambahkan reaksi.
-        $insertReaction = $pdo->prepare("
-            INSERT INTO message_reactions
-                (message_id, user_id, emoji)
-            VALUES (?, ?, ?)
-        ");
-
-        $insertReaction->execute([
-            $messageId,
-            $uid,
-            $emoji
-        ]);
-
-        $pdo->commit();
-
-        reactJsonResponse(
-            'success',
-            'Reaksi berhasil ditambahkan.',
-            'added'
-        );
+        reactJsonResponse('success', 'Reaksi berhasil dihapus.', 'removed');
     }
 
-} catch (Throwable $e) {
+    // Tambah reaksi
+    $insertReaction = $pdo->prepare("
+        INSERT INTO message_reactions (message_id, user_id, emoji)
+        VALUES (?, ?, ?)
+    ");
+    $insertReaction->execute([$messageId, $uid, $emoji]);
 
+    $pdo->commit();
+
+    reactJsonResponse('success', 'Reaksi berhasil ditambahkan.', 'added');
+
+} catch (Throwable $e) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }
 
     error_log('obrolan_react: ' . $e->getMessage());
 
-    reactJsonResponse(
-        'error',
-        'Terjadi kesalahan saat memproses reaksi.',
-        null,
-        500
-    );
+    reactJsonResponse('error', 'Terjadi kesalahan saat memproses reaksi.', null, 500);
 }

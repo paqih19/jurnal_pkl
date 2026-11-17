@@ -1,4 +1,3 @@
-
 <?php
 // ======================================================
 // LOGIN.PHP - JURNAL KERJA PKL
@@ -13,6 +12,7 @@ require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/includes/activity.php';
 
 $appName = defined('APP_NAME') ? APP_NAME : 'Jurnal PKL';
+$baseUrl = defined('BASE_URL') ? rtrim(BASE_URL, '/') : '';
 
 function loginEscape($value): string
 {
@@ -21,28 +21,51 @@ function loginEscape($value): string
 
 // Jika sudah login
 if (!empty($_SESSION['user_id'])) {
-    header('Location: dashboard.php');
+    header('Location: ' . $baseUrl . '/dashboard.php');
+    exit;
+}
+
+// ======================================================
+// PASTIKAN $pdo TERSEDIA
+// ======================================================
+if (!isset($pdo) || !($pdo instanceof PDO)) {
+    http_response_code(500);
+    ?>
+    <!DOCTYPE html>
+    <html lang="id">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Koneksi Database Gagal</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-50 flex items-center justify-center min-h-screen">
+        <div class="text-center p-8 bg-white rounded-2xl shadow-lg max-w-md">
+            <div class="text-6xl mb-4">🔌</div>
+            <h1 class="text-xl font-bold text-gray-800 mb-2">Koneksi Database Gagal</h1>
+            <p class="text-sm text-gray-500">Pastikan konfigurasi database di <code>config/db.php</code> sudah benar dan server MySQL berjalan.</p>
+        </div>
+    </body>
+    </html>
+    <?php
     exit;
 }
 
 // ======================================================
 // DETEKSI KOLOM DATABASE
 // ======================================================
-
 $hasUsernameCol = false;
-$hasEmailCol = false;
-$hasStatusCol = false;
+$hasEmailCol    = false;
+$hasStatusCol   = false;
 $hasRememberCol = false;
 
 try {
-    $columns = $pdo->query("SHOW COLUMNS FROM users")
-                   ->fetchAll(PDO::FETCH_COLUMN);
+    $columns = $pdo->query("SHOW COLUMNS FROM users")->fetchAll(PDO::FETCH_COLUMN);
 
     $hasUsernameCol = in_array('username', $columns, true);
-    $hasEmailCol = in_array('email', $columns, true);
-    $hasStatusCol = in_array('status', $columns, true);
+    $hasEmailCol    = in_array('email', $columns, true);
+    $hasStatusCol   = in_array('status', $columns, true);
     $hasRememberCol = in_array('remember_token', $columns, true);
-
 } catch (Throwable $e) {
     error_log('Login database detection: ' . $e->getMessage());
 }
@@ -50,7 +73,6 @@ try {
 // ======================================================
 // CSRF TOKEN
 // ======================================================
-
 if (empty($_SESSION['csrf_login'])) {
     $_SESSION['csrf_login'] = bin2hex(random_bytes(32));
 }
@@ -60,17 +82,14 @@ $csrf = $_SESSION['csrf_login'];
 // ======================================================
 // RATE LIMIT
 // ======================================================
-
 $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-$rateKey = 'login_attempts_ip_' . md5($ipAddress);
+$rateKey   = 'login_attempts_ip_' . md5($ipAddress);
 
 $attempts = $_SESSION[$rateKey] ?? [];
-
 $attempts = array_values(array_filter(
     $attempts,
     fn($time) => time() - (int) $time < 900
 ));
-
 $_SESSION[$rateKey] = $attempts;
 $isBlocked = count($attempts) >= 5;
 
@@ -80,27 +99,19 @@ $usernameInput = '';
 // ======================================================
 // PROSES LOGIN
 // ======================================================
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
     if (
         empty($_POST['csrf']) ||
         empty($_SESSION['csrf_login']) ||
         !hash_equals($_SESSION['csrf_login'], (string) $_POST['csrf'])
     ) {
         $error = 'Sesi kedaluwarsa. Silakan muat ulang halaman.';
-
     } elseif (!empty($_POST['website'])) {
-
         $_SESSION[$rateKey][] = time();
         $error = 'Login gagal.';
-
     } elseif ($isBlocked) {
-
         $error = 'Terlalu banyak percobaan login. Silakan coba lagi setelah 15 menit.';
-
     } else {
-
         $username = trim((string) ($_POST['username'] ?? ''));
         $password = (string) ($_POST['password'] ?? '');
         $remember = !empty($_POST['remember']);
@@ -108,87 +119,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $usernameInput = $username;
 
         if ($username === '' || $password === '') {
-
             $error = 'Username dan password wajib diisi.';
-
-        } elseif (
-            (function_exists('mb_strlen') ? mb_strlen($username) : strlen($username)) > 50
-        ) {
-
+        } elseif ((function_exists('mb_strlen') ? mb_strlen($username) : strlen($username)) > 50) {
             $error = 'Username terlalu panjang.';
-
         } else {
-
             try {
-
                 if ($hasUsernameCol) {
-
-                    $stmt = $pdo->prepare("
-                        SELECT *
-                        FROM users
-                        WHERE username = ?
-                        LIMIT 1
-                    ");
-
+                    $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? LIMIT 1");
                     $stmt->execute([$username]);
-
                 } elseif ($hasEmailCol) {
-
-                    $stmt = $pdo->prepare("
-                        SELECT *
-                        FROM users
-                        WHERE email = ? OR email LIKE ?
-                        LIMIT 1
-                    ");
-
-                    $stmt->execute([
-                        $username,
-                        $username . '@%'
-                    ]);
-
+                    $stmt = $pdo->prepare("SELECT * FROM users WHERE email = ? OR email LIKE ? LIMIT 1");
+                    $stmt->execute([$username, $username . '@%']);
                 } else {
-
-                    throw new RuntimeException(
-                        'Kolom username dan email tidak ditemukan.'
-                    );
+                    throw new RuntimeException('Kolom username dan email tidak ditemukan.');
                 }
 
                 $u = $stmt->fetch(PDO::FETCH_ASSOC);
 
-                if (
-                    !$u ||
-                    empty($u['password']) ||
-                    !password_verify($password, $u['password'])
-                ) {
-
+                if (!$u || empty($u['password']) || !password_verify($password, $u['password'])) {
                     $_SESSION[$rateKey][] = time();
-
                     $error = 'Username atau password salah.';
 
                     if (function_exists('logActivity')) {
-                        logActivity(
-                            'login_failed',
-                            'Percobaan login gagal: ' . substr($username, 0, 50)
-                        );
+                        logActivity('login_failed', 'Percobaan login gagal: ' . substr($username, 0, 50));
                     }
-
                 } else {
-
                     // Cek status akun
                     if ($hasStatusCol) {
-
-                        $accountStatus = strtolower(
-                            trim((string) ($u['status'] ?? 'aktif'))
-                        );
-
-                        $inactiveStatuses = [
-                            'nonaktif',
-                            'non-aktif',
-                            'inactive',
-                            'disabled',
-                            'banned',
-                            '0'
-                        ];
+                        $accountStatus = strtolower(trim((string) ($u['status'] ?? 'aktif')));
+                        $inactiveStatuses = ['nonaktif', 'non-aktif', 'inactive', 'disabled', 'banned', '0'];
 
                         if (in_array($accountStatus, $inactiveStatuses, true)) {
                             $error = 'Akun kamu sedang nonaktif. Hubungi admin atau pembimbing.';
@@ -197,24 +156,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     // Verifikasi 2FA
                     if ($error === null) {
-
-                        $twofaActive =
-                            !empty($u['twofa_enabled']) &&
-                            !empty($u['twofa_secret']);
+                        $twofaActive = !empty($u['twofa_enabled']) && !empty($u['twofa_secret']);
 
                         if ($twofaActive) {
-
                             if (file_exists(__DIR__ . '/verify_2fa.php')) {
-
-                                $_SESSION['2fa_user_id'] = (int) $u['id'];
-                                $_SESSION['2fa_pending'] = true;
+                                $_SESSION['2fa_user_id']  = (int) $u['id'];
+                                $_SESSION['2fa_pending']  = true;
                                 $_SESSION['2fa_remember'] = $remember;
 
-                                header('Location: verify_2fa.php');
+                                header('Location: ' . $baseUrl . '/verify_2fa.php');
                                 exit;
-
                             } else {
-
                                 $error = 'Verifikasi keamanan belum tersedia. Hubungi administrator.';
                             }
                         }
@@ -222,26 +174,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     // Login berhasil
                     if ($error === null) {
-
                         $_SESSION = [];
-
                         session_regenerate_id(true);
 
-                        $_SESSION['user_id'] = (int) $u['id'];
-                        $_SESSION['name'] = $u['name'] ?? '';
-                        $_SESSION['username'] = $u['username'] ?? $username;
-                        $_SESSION['email'] = $u['email'] ?? '';
-                        $_SESSION['role'] = $u['role'] ?? 'student';
-                        $_SESSION['photo'] = $u['photo'] ?? null;
+                        $_SESSION['user_id']       = (int) $u['id'];
+                        $_SESSION['name']          = $u['name'] ?? '';
+                        $_SESSION['username']      = $u['username'] ?? $username;
+                        $_SESSION['email']         = $u['email'] ?? '';
+                        $_SESSION['role']          = $u['role'] ?? 'student';
+                        $_SESSION['photo']         = $u['photo'] ?? null;
                         $_SESSION['last_activity'] = time();
-                        $_SESSION['csrf_login'] = bin2hex(random_bytes(32));
+                        $_SESSION['csrf_login']    = bin2hex(random_bytes(32));
 
                         // Remember me
                         $cookiePath = '/';
 
-                        if (defined('BASE_URL')) {
-                            $basePath = parse_url(BASE_URL, PHP_URL_PATH);
-
+                        if ($baseUrl !== '') {
+                            $basePath = parse_url($baseUrl, PHP_URL_PATH);
                             if (is_string($basePath) && $basePath !== '') {
                                 $cookiePath = rtrim($basePath, '/') . '/';
                             }
@@ -253,82 +202,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         );
 
                         if ($hasRememberCol) {
-
                             try {
-
                                 if ($remember) {
-
-                                    $token = bin2hex(random_bytes(32));
+                                    $token       = bin2hex(random_bytes(32));
                                     $hashedToken = hash('sha256', $token);
 
-                                    $stmtRemember = $pdo->prepare("
-                                        UPDATE users
-                                        SET remember_token = ?
-                                        WHERE id = ?
-                                    ");
-
-                                    $stmtRemember->execute([
-                                        $hashedToken,
-                                        $u['id']
-                                    ]);
+                                    $stmtRemember = $pdo->prepare("UPDATE users SET remember_token = ? WHERE id = ?");
+                                    $stmtRemember->execute([$hashedToken, $u['id']]);
 
                                     setcookie('remember_token', $token, [
-                                        'expires' => time() + (60 * 60 * 24 * 30),
-                                        'path' => $cookiePath,
-                                        'secure' => $isSecure,
+                                        'expires'  => time() + (60 * 60 * 24 * 30),
+                                        'path'     => $cookiePath,
+                                        'secure'   => $isSecure,
                                         'httponly' => true,
                                         'samesite' => 'Lax'
                                     ]);
-
                                 } else {
-
-                                    $pdo->prepare("
-                                        UPDATE users
-                                        SET remember_token = NULL
-                                        WHERE id = ?
-                                    ")->execute([$u['id']]);
+                                    $pdo->prepare("UPDATE users SET remember_token = NULL WHERE id = ?")
+                                        ->execute([$u['id']]);
 
                                     setcookie('remember_token', '', [
-                                        'expires' => time() - 3600,
-                                        'path' => $cookiePath,
-                                        'secure' => $isSecure,
+                                        'expires'  => time() - 3600,
+                                        'path'     => $cookiePath,
+                                        'secure'   => $isSecure,
                                         'httponly' => true,
                                         'samesite' => 'Lax'
                                     ]);
                                 }
-
                             } catch (Throwable $e) {
                                 error_log('Remember me error: ' . $e->getMessage());
                             }
                         }
 
                         if (function_exists('logActivity')) {
-                            logActivity(
-                                'login',
-                                'Login berhasil via username: ' . substr($username, 0, 50)
-                            );
+                            logActivity('login', 'Login berhasil via username: ' . substr($username, 0, 50));
                         }
 
                         unset($_SESSION[$rateKey]);
 
-                        header('Location: dashboard.php');
+                        header('Location: ' . $baseUrl . '/dashboard.php');
                         exit;
                     }
                 }
-
             } catch (Throwable $e) {
-
                 $error = 'Terjadi kesalahan sistem. Silakan coba lagi.';
-
                 error_log('Login error: ' . $e->getMessage());
             }
         }
     }
 }
 
-$attempts = $_SESSION[$rateKey] ?? [];
+$attempts  = $_SESSION[$rateKey] ?? [];
 $isBlocked = count($attempts) >= 5;
-
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -349,21 +274,15 @@ $isBlocked = count($attempts) >= 5;
         tailwind.config = {
             theme: {
                 extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif']
-                    },
-                    colors: {
-                        primary: '#4F46E5'
-                    }
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: { primary: '#4F46E5' }
                 }
             }
         }
     </script>
 
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
         body {
             font-family: 'Inter', sans-serif;
@@ -409,9 +328,7 @@ $isBlocked = count($attempts) >= 5;
             box-shadow: 0 12px 25px rgba(79,70,229,.25);
         }
 
-        .login-input {
-            transition: .2s ease;
-        }
+        .login-input { transition: .2s ease; }
 
         .login-input:focus {
             border-color: #6366F1;
@@ -419,9 +336,7 @@ $isBlocked = count($attempts) >= 5;
             background: #fff;
         }
 
-        .floating {
-            animation: floating 5s ease-in-out infinite;
-        }
+        .floating { animation: floating 5s ease-in-out infinite; }
 
         @keyframes floating {
             0%, 100% { transform: translateY(0); }
@@ -435,48 +350,23 @@ $isBlocked = count($attempts) >= 5;
             pointer-events: none;
         }
 
-        .feature-card {
-            transition: .2s ease;
-        }
-
+        .feature-card { transition: .2s ease; }
         .feature-card:hover {
             transform: translateX(5px);
             background: rgba(255,255,255,.18);
         }
 
         @media (max-width: 767px) {
-            body {
-                padding: 18px 12px;
-            }
-
-            .main-card {
-                grid-template-columns: 1fr;
-                min-height: auto;
-                border-radius: 22px;
-            }
-
-            .welcome-panel {
-                min-height: auto !important;
-                padding: 30px 24px !important;
-            }
-
-            .welcome-illustration {
-                margin: 25px auto;
-            }
-
-            .login-panel {
-                padding: 35px 24px !important;
-            }
-
-            .welcome-title {
-                font-size: 27px !important;
-            }
+            body { padding: 18px 12px; }
+            .main-card { grid-template-columns: 1fr; min-height: auto; border-radius: 22px; }
+            .welcome-panel { min-height: auto !important; padding: 30px 24px !important; }
+            .welcome-illustration { margin: 25px auto; }
+            .login-panel { padding: 35px 24px !important; }
+            .welcome-title { font-size: 27px !important; }
         }
 
         @media (max-width: 380px) {
-            .login-panel {
-                padding: 28px 18px !important;
-            }
+            .login-panel { padding: 28px 18px !important; }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -498,40 +388,33 @@ $isBlocked = count($attempts) >= 5;
     </div>
 
     <main class="relative w-full max-w-[1100px]">
-
         <div class="main-card">
 
             <!-- =================================================
                  PANEL KIRI - INFORMASI APLIKASI
             ================================================== -->
             <section class="welcome-panel gradient-bg relative flex flex-col justify-between p-9 md:p-11 text-white overflow-hidden">
-
                 <div class="decor-circle w-72 h-72 -top-24 -right-24"></div>
                 <div class="decor-circle w-52 h-52 bottom-10 -left-24"></div>
                 <div class="decor-circle w-32 h-32 bottom-28 right-10"></div>
 
                 <!-- Logo -->
                 <div class="relative z-10">
-                    <a href="index.php" class="inline-flex items-center gap-3">
+                    <a href="<?= loginEscape($baseUrl) ?>/index.php" class="inline-flex items-center gap-3">
                         <div class="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur">
                             <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
                                     d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5S19.832 5.477 21 6.253v13C19.832 18.477 18.246 18 16.5 18s-3.332.477-4.5 1.253"/>
                             </svg>
                         </div>
-
-                        <span class="font-extrabold text-xl">
-                            <?= loginEscape($appName) ?>
-                        </span>
+                        <span class="font-extrabold text-xl"><?= loginEscape($appName) ?></span>
                     </a>
                 </div>
 
                 <!-- Konten Sambutan -->
                 <div class="relative z-10 py-8">
-
                     <div class="floating welcome-illustration flex justify-center mb-8">
                         <div class="relative w-56 h-52 flex items-center justify-center">
-
                             <div class="absolute w-48 h-48 bg-white/10 rounded-full"></div>
                             <div class="absolute w-36 h-36 bg-white/10 rounded-full"></div>
 
@@ -557,15 +440,12 @@ $isBlocked = count($attempts) >= 5;
                                         d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                                 </svg>
                             </div>
-
                         </div>
                     </div>
 
                     <h1 class="welcome-title text-3xl md:text-4xl font-black leading-tight text-center">
                         Selamat Datang di
-                        <span class="block text-indigo-100 mt-1">
-                            <?= loginEscape($appName) ?>
-                        </span>
+                        <span class="block text-indigo-100 mt-1"><?= loginEscape($appName) ?></span>
                     </h1>
 
                     <p class="text-indigo-100 text-sm leading-relaxed text-center mt-5 max-w-sm mx-auto">
@@ -574,7 +454,6 @@ $isBlocked = count($attempts) >= 5;
 
                     <!-- Fitur -->
                     <div class="space-y-3 mt-8">
-
                         <div class="feature-card flex items-center gap-4 p-3.5 rounded-2xl bg-white/10 border border-white/15">
                             <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -613,7 +492,6 @@ $isBlocked = count($attempts) >= 5;
                                 <p class="text-xs text-indigo-100 mt-1">Terhubung dengan anggota dan pembimbing.</p>
                             </div>
                         </div>
-
                     </div>
                 </div>
 
@@ -621,31 +499,23 @@ $isBlocked = count($attempts) >= 5;
                     <span>Jurnal Kerja Praktik Lapangan</span>
                     <span>&copy; <?= date('Y') ?></span>
                 </div>
-
             </section>
 
             <!-- =================================================
                  PANEL KANAN - FORM LOGIN
             ================================================== -->
             <section class="login-panel flex flex-col justify-center p-8 md:p-12 lg:p-14 bg-white">
-
                 <div class="max-w-md mx-auto w-full">
-
                     <div class="mb-8">
-
                         <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold mb-6">
                             <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
                             SISTEM INFORMASI PKL
                         </span>
 
-                        <h2 class="text-3xl md:text-4xl font-black text-slate-800">
-                            Selamat Datang!
-                        </h2>
-
+                        <h2 class="text-3xl md:text-4xl font-black text-slate-800">Selamat Datang!</h2>
                         <p class="text-slate-500 text-sm leading-relaxed mt-3">
                             Masuk ke akun kamu untuk melanjutkan aktivitas Praktik Kerja Lapangan.
                         </p>
-
                     </div>
 
                     <?php if ($error): ?>
@@ -670,7 +540,6 @@ $isBlocked = count($attempts) >= 5;
                     <?php endif; ?>
 
                     <form method="POST" autocomplete="on" id="login-form">
-
                         <input type="hidden" name="csrf" value="<?= loginEscape($csrf) ?>">
 
                         <!-- HONEYPOT -->
@@ -681,10 +550,7 @@ $isBlocked = count($attempts) >= 5;
 
                         <!-- USERNAME -->
                         <div class="mb-5">
-                            <label for="username" class="block text-sm font-bold text-slate-700 mb-2">
-                                Username
-                            </label>
-
+                            <label for="username" class="block text-sm font-bold text-slate-700 mb-2">Username</label>
                             <div class="relative">
                                 <span class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -711,14 +577,9 @@ $isBlocked = count($attempts) >= 5;
                         <!-- PASSWORD -->
                         <div class="mb-5">
                             <div class="flex justify-between items-center mb-2">
-                                <label for="password" class="text-sm font-bold text-slate-700">
-                                    Password
-                                </label>
-
+                                <label for="password" class="text-sm font-bold text-slate-700">Password</label>
                                 <button type="button" onclick="togglePassword()" id="toggle-pwd"
-                                    class="text-xs text-indigo-600 hover:text-purple-600 font-bold">
-                                    Lihat
-                                </button>
+                                    class="text-xs text-indigo-600 hover:text-purple-600 font-bold">Lihat</button>
                             </div>
 
                             <div class="relative">
@@ -743,7 +604,6 @@ $isBlocked = count($attempts) >= 5;
 
                         <!-- REMEMBER & FORGOT PASSWORD -->
                         <div class="flex items-center justify-between gap-3 mb-7">
-
                             <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
                                 <input
                                     type="checkbox"
@@ -755,12 +615,11 @@ $isBlocked = count($attempts) >= 5;
                             </label>
 
                             <?php if (file_exists(__DIR__ . '/lupa_password.php')): ?>
-                                <a href="lupa_password.php"
+                                <a href="<?= loginEscape($baseUrl) ?>/lupa_password.php"
                                     class="text-sm text-indigo-600 hover:text-purple-600 font-semibold hover:underline">
                                     Lupa password?
                                 </a>
                             <?php endif; ?>
-
                         </div>
 
                         <!-- SUBMIT -->
@@ -769,22 +628,14 @@ $isBlocked = count($attempts) >= 5;
                             id="submit-btn"
                             <?= $isBlocked ? 'disabled' : '' ?>
                             class="primary-button w-full text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 transition disabled:opacity-50 disabled:cursor-not-allowed">
-
                             <span id="button-text">Masuk ke Akun →</span>
-
                         </button>
-
                     </form>
 
                     <!-- INFORMASI BANTUAN -->
                     <div class="mt-8 pt-6 border-t border-slate-100 text-center">
-                        <p class="text-sm text-slate-500">
-                            Belum punya akun?
-                        </p>
-
-                        <p class="text-sm text-slate-700 font-semibold mt-1">
-                            Hubungi admin atau pembimbing untuk mendapatkan akun.
-                        </p>
+                        <p class="text-sm text-slate-500">Belum punya akun?</p>
+                        <p class="text-sm text-slate-700 font-semibold mt-1">Hubungi admin atau pembimbing untuk mendapatkan akun.</p>
                     </div>
 
                     <div class="mt-7 flex items-center justify-center gap-2 text-xs text-slate-400">
@@ -794,17 +645,13 @@ $isBlocked = count($attempts) >= 5;
                         </svg>
                         Login aman dan terlindungi
                     </div>
-
                 </div>
-
             </section>
-
         </div>
 
         <!-- FOOTER -->
         <div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-5 px-2">
-
-            <a href="index.php"
+            <a href="<?= loginEscape($baseUrl) ?>/index.php"
                 class="inline-flex items-center gap-2 text-sm font-semibold text-indigo-700 hover:text-purple-700 transition">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
@@ -815,13 +662,10 @@ $isBlocked = count($attempts) >= 5;
             <p class="text-xs text-slate-400 text-center">
                 &copy; <?= date('Y') ?> <?= loginEscape($appName) ?> · Jurnal Kerja PKL
             </p>
-
         </div>
-
     </main>
 
     <script>
-        // Lihat / sembunyikan password
         function togglePassword() {
             const password = document.getElementById('password');
             const button = document.getElementById('toggle-pwd');
@@ -835,23 +679,18 @@ $isBlocked = count($attempts) >= 5;
             }
         }
 
-        // Indikator proses login
         document.getElementById('login-form').addEventListener('submit', function () {
             const button = document.getElementById('submit-btn');
             const buttonText = document.getElementById('button-text');
 
-            if (button.disabled) {
-                return;
-            }
+            if (button.disabled) return;
 
             button.disabled = true;
             buttonText.textContent = 'Memproses login...';
         });
 
-        // Fokus ke username saat halaman dibuka
         window.addEventListener('load', function () {
             const username = document.getElementById('username');
-
             if (username && !username.disabled) {
                 username.focus();
             }

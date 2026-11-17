@@ -1,4 +1,3 @@
-
 <?php
 // monitoring.php
 // Monitoring khusus pembimbing
@@ -24,11 +23,24 @@ $perPage = 20;
 $offset  = ($page - 1) * $perPage;
 
 // ==================================================
+// PASTIKAN $pdo TERSEDIA
+// ==================================================
+if (!isset($pdo) || !($pdo instanceof PDO)) {
+    http_response_code(500);
+    exit('Koneksi database tidak tersedia.');
+}
+
+// ==================================================
 // DETEKSI STRUKTUR TABEL
 // ==================================================
 
 function monitoringColumns(PDO $pdo, string $table): array
 {
+    static $allowedTables = ['users', 'attendance', 'journals', 'tasks'];
+    if (!in_array($table, $allowedTables, true)) {
+        return [];
+    }
+
     $columns = [];
 
     try {
@@ -68,6 +80,8 @@ $hasTasks = isset($taskCols['id'])
     && isset($taskCols['assigned_to'])
     && isset($taskCols['created_by']);
 
+$hasAttendance = isset($attCols['user_id']) && isset($attCols['status']) && isset($attCols['date']);
+
 // ==================================================
 // DETEKSI ROLE SISWA
 // ==================================================
@@ -105,10 +119,12 @@ if (isset($attCols['status'])) {
     if (preg_match("/enum\((.*)\)/i", $statusType, $matches)) {
         preg_match_all("/'([^']+)'/", $matches[1], $values);
 
-        $statusOptions = [];
+        if (!empty($values[1])) {
+            $statusOptions = [];
 
-        foreach ($values[1] as $value) {
-            $statusOptions[$value] = ucfirst($value);
+            foreach ($values[1] as $value) {
+                $statusOptions[$value] = ucfirst($value);
+            }
         }
     }
 }
@@ -117,7 +133,7 @@ if (isset($attCols['status'])) {
 // FILTER DATA SISWA
 // ==================================================
 
-$where = ["u.role = :roleSiswa"];
+$where  = ["u.role = :roleSiswa"];
 $params = [':roleSiswa' => $roleSiswa];
 
 if ($search !== '') {
@@ -170,46 +186,50 @@ $stats = [
     'alpha'       => 0
 ];
 
-try {
-    $sqlStats = "
-        SELECT
-            COUNT(DISTINCT u.id) AS total,
-            COUNT(DISTINCT CASE WHEN a.status IS NOT NULL THEN u.id END) AS sudah_absen,
-            COUNT(DISTINCT CASE WHEN a.status IS NULL THEN u.id END) AS belum_absen
-    ";
-
-    foreach (array_keys($statusOptions) as $status) {
-        $safeStatus = str_replace('-', '_', $status);
-
-        $sqlStats .= ",
-            COUNT(DISTINCT CASE
-                WHEN a.status = " . $pdo->quote($status) . "
-                THEN u.id
-            END) AS `$safeStatus`
+if ($hasAttendance) {
+    try {
+        $sqlStats = "
+            SELECT
+                COUNT(DISTINCT u.id) AS total,
+                COUNT(DISTINCT CASE WHEN a.status IS NOT NULL THEN u.id END) AS sudah_absen,
+                COUNT(DISTINCT CASE WHEN a.status IS NULL THEN u.id END) AS belum_absen
         ";
+
+        foreach (array_keys($statusOptions) as $status) {
+            $safeStatus = preg_replace('/[^a-zA-Z0-9_]/', '_', $status);
+
+            $sqlStats .= ",
+                COUNT(DISTINCT CASE
+                    WHEN a.status = " . $pdo->quote($status) . "
+                    THEN u.id
+                END) AS `$safeStatus`
+            ";
+        }
+
+        $sqlStats .= "
+            FROM users u
+            LEFT JOIN attendance a
+                ON a.user_id = u.id
+                AND a.date = :today
+            WHERE u.role = :roleSiswa
+        ";
+
+        $stmtStats = $pdo->prepare($sqlStats);
+        $stmtStats->execute([
+            ':today'     => $today,
+            ':roleSiswa' => $roleSiswa
+        ]);
+
+        $resultStats = $stmtStats->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        foreach ($resultStats as $key => $value) {
+            if (array_key_exists($key, $stats)) {
+                $stats[$key] = (int) $value;
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('Monitoring stats error: ' . $e->getMessage());
     }
-
-    $sqlStats .= "
-        FROM users u
-        LEFT JOIN attendance a
-            ON a.user_id = u.id
-            AND a.date = :today
-        WHERE u.role = :roleSiswa
-    ";
-
-    $stmtStats = $pdo->prepare($sqlStats);
-    $stmtStats->execute([
-        ':today' => $today,
-        ':roleSiswa' => $roleSiswa
-    ]);
-
-    $resultStats = $stmtStats->fetch(PDO::FETCH_ASSOC) ?: [];
-
-    foreach ($resultStats as $key => $value) {
-        $stats[$key] = (int) $value;
-    }
-} catch (Throwable $e) {
-    // Statistik tetap menggunakan nilai default.
 }
 
 // ==================================================
@@ -217,7 +237,7 @@ try {
 // ==================================================
 
 $jurusanList = [];
-$kelasList = [];
+$kelasList   = [];
 
 try {
     if ($hasJurusan) {
@@ -332,9 +352,9 @@ if ($hasTasks) {
 // HITUNG TOTAL SISWA
 // ==================================================
 
-$totalRows = 0;
+$totalRows  = 0;
 $totalPages = 1;
-$siswa = [];
+$siswa      = [];
 
 try {
     $countStmt = $pdo->prepare("
@@ -351,11 +371,11 @@ try {
 
     $countStmt->execute($countParams);
 
-    $totalRows = (int) $countStmt->fetchColumn();
+    $totalRows  = (int) $countStmt->fetchColumn();
     $totalPages = max(1, (int) ceil($totalRows / $perPage));
 
     if ($page > $totalPages) {
-        $page = $totalPages;
+        $page   = $totalPages;
         $offset = ($page - 1) * $perPage;
     }
 
@@ -365,25 +385,11 @@ try {
 
     $select = "u.id, u.name";
 
-    if ($hasEmail) {
-        $select .= ", u.email";
-    }
-
-    if ($hasPhoto) {
-        $select .= ", u.photo";
-    }
-
-    if ($hasJurusan) {
-        $select .= ", u.jurusan";
-    }
-
-    if ($hasKelas) {
-        $select .= ", u.kelas";
-    }
-
-    if ($hasNis) {
-        $select .= ", u.nis";
-    }
+    if ($hasEmail)   $select .= ", u.email";
+    if ($hasPhoto)   $select .= ", u.photo";
+    if ($hasJurusan) $select .= ", u.jurusan";
+    if ($hasKelas)   $select .= ", u.kelas";
+    if ($hasNis)     $select .= ", u.nis";
 
     $attSelect = "a.status AS absen_hari_ini";
 
@@ -468,7 +474,6 @@ require_once __DIR__ . '/includes/header.php';
 <!-- STATISTIK ABSENSI -->
 
 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-
     <?php
     $cards = [
         ['Total Siswa', $stats['total'], 'text-indigo-600', '👥'],
@@ -486,20 +491,17 @@ require_once __DIR__ . '/includes/header.php';
             <div class="text-xs text-gray-500 mb-1">
                 <?= $icon ?> <?= e($label) ?>
             </div>
-
             <div class="text-2xl font-bold <?= $color ?>">
                 <?= (int) $value ?>
             </div>
         </div>
     <?php endforeach; ?>
-
 </div>
 
 <!-- FILTER -->
 
 <form method="get"
       class="bg-white dark:bg-gray-800 rounded-xl p-4 mb-6 border border-gray-100 dark:border-gray-700">
-
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
 
         <input
@@ -513,45 +515,34 @@ require_once __DIR__ . '/includes/header.php';
         <?php if ($hasJurusan): ?>
             <select name="jurusan"
                     class="px-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm dark:text-white">
-
                 <option value="">Semua Jurusan</option>
-
                 <?php foreach ($jurusanList as $j): ?>
                     <option value="<?= e($j) ?>"
                         <?= $filterJurusan === $j ? 'selected' : '' ?>>
                         <?= e($j) ?>
                     </option>
                 <?php endforeach; ?>
-
             </select>
         <?php endif; ?>
 
         <?php if ($hasKelas): ?>
             <select name="kelas"
                     class="px-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm dark:text-white">
-
                 <option value="">Semua Kelas</option>
-
                 <?php foreach ($kelasList as $k): ?>
                     <option value="<?= e($k) ?>"
                         <?= $filterKelas === $k ? 'selected' : '' ?>>
                         <?= e($k) ?>
                     </option>
                 <?php endforeach; ?>
-
             </select>
         <?php endif; ?>
 
         <select name="status"
                 class="px-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm dark:text-white">
-
             <option value="">Semua Status</option>
-            <option value="sudah" <?= $filterStatus === 'sudah' ? 'selected' : '' ?>>
-                Sudah Absen
-            </option>
-            <option value="belum" <?= $filterStatus === 'belum' ? 'selected' : '' ?>>
-                Belum Absen
-            </option>
+            <option value="sudah" <?= $filterStatus === 'sudah' ? 'selected' : '' ?>>Sudah Absen</option>
+            <option value="belum" <?= $filterStatus === 'belum' ? 'selected' : '' ?>>Belum Absen</option>
 
             <?php foreach ($statusOptions as $value => $label): ?>
                 <option value="<?= e($value) ?>"
@@ -559,21 +550,17 @@ require_once __DIR__ . '/includes/header.php';
                     <?= e($label) ?>
                 </option>
             <?php endforeach; ?>
-
         </select>
 
         <div class="flex gap-2">
-
             <button type="submit"
                     class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">
                 Filter
             </button>
-
             <a href="monitoring.php"
                class="px-4 py-2 rounded-lg text-sm border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
                 Reset
             </a>
-
         </div>
 
     </div>
@@ -582,33 +569,20 @@ require_once __DIR__ . '/includes/header.php';
 <!-- TABEL MONITORING -->
 
 <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-
     <div class="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center flex-wrap gap-2">
-
         <div>
-            <h2 class="font-bold dark:text-white">
-                Daftar Siswa
-            </h2>
-
-            <p class="text-xs text-gray-500">
-                Total <?= $totalRows ?> siswa ditemukan
-            </p>
+            <h2 class="font-bold dark:text-white">Daftar Siswa</h2>
+            <p class="text-xs text-gray-500">Total <?= $totalRows ?> siswa ditemukan</p>
         </div>
-
         <span class="text-xs text-gray-500">
             Halaman <?= $page ?> dari <?= $totalPages ?>
         </span>
-
     </div>
 
     <div class="overflow-x-auto">
-
         <table class="w-full text-left">
-
             <thead class="bg-gray-50 dark:bg-gray-700/30">
-
                 <tr class="text-xs text-gray-500 uppercase">
-
                     <th class="py-3 px-4">Siswa</th>
                     <th class="py-3 px-4">Jurusan / Kelas</th>
                     <th class="py-3 px-4">Absensi</th>
@@ -616,35 +590,20 @@ require_once __DIR__ . '/includes/header.php';
                     <th class="py-3 px-4">Tugas</th>
                     <th class="py-3 px-4">Aktivitas Terakhir</th>
                     <th class="py-3 px-4 text-right">Aksi</th>
-
                 </tr>
-
             </thead>
 
             <tbody class="text-sm divide-y divide-gray-100 dark:divide-gray-700">
-
                 <?php if (!$siswa): ?>
-
                     <tr>
                         <td colspan="7" class="py-12 text-center text-gray-500">
-
                             <div class="text-4xl mb-2">🔍</div>
-
-                            <div class="font-semibold">
-                                Tidak ada siswa yang cocok
-                            </div>
-
-                            <div class="text-xs mt-1">
-                                Coba ubah filter atau kata kunci pencarian.
-                            </div>
-
+                            <div class="font-semibold">Tidak ada siswa yang cocok</div>
+                            <div class="text-xs mt-1">Coba ubah filter atau kata kunci pencarian.</div>
                         </td>
                     </tr>
-
                 <?php else: ?>
-
                     <?php foreach ($siswa as $s): ?>
-
                         <?php
                         $status = $s['absen_hari_ini'] ?? null;
 
@@ -665,191 +624,114 @@ require_once __DIR__ . '/includes/header.php';
                             : 'Belum pernah';
 
                         $photo = $s['photo'] ?? null;
-                        $name = $s['name'] ?? 'Siswa';
-
+                        $name  = $s['name'] ?? 'Siswa';
                         ?>
 
                         <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-
                             <!-- IDENTITAS -->
-
                             <td class="py-3 px-4">
-
                                 <div class="flex items-center gap-3">
-
                                     <img
                                         src="<?= avatarUrl($photo, $name, 36) ?>"
                                         class="w-9 h-9 rounded-full object-cover"
                                         alt="Foto siswa"
                                     >
-
                                     <div>
-
-                                        <div class="font-medium dark:text-white">
-                                            <?= e($name) ?>
-                                        </div>
-
+                                        <div class="font-medium dark:text-white"><?= e($name) ?></div>
                                         <?php if (!empty($s['email'])): ?>
-                                            <div class="text-xs text-gray-500">
-                                                <?= e($s['email']) ?>
-                                            </div>
+                                            <div class="text-xs text-gray-500"><?= e($s['email']) ?></div>
                                         <?php endif; ?>
-
                                         <?php if (!empty($s['nis'])): ?>
-                                            <div class="text-xs text-gray-400">
-                                                NIS: <?= e($s['nis']) ?>
-                                            </div>
+                                            <div class="text-xs text-gray-400">NIS: <?= e($s['nis']) ?></div>
                                         <?php endif; ?>
-
                                     </div>
-
                                 </div>
-
                             </td>
 
                             <!-- JURUSAN -->
-
                             <td class="py-3 px-4 text-gray-600 dark:text-gray-300">
-
-                                <div>
-                                    <?= e($s['jurusan'] ?? '-') ?: '-' ?>
-                                </div>
-
+                                <div><?= e($s['jurusan'] ?? '') ?: '-' ?></div>
                                 <?php if (!empty($s['kelas'])): ?>
-                                    <div class="text-xs text-gray-400">
-                                        Kelas <?= e($s['kelas']) ?>
-                                    </div>
+                                    <div class="text-xs text-gray-400">Kelas <?= e($s['kelas']) ?></div>
                                 <?php endif; ?>
-
                             </td>
 
                             <!-- ABSENSI -->
-
                             <td class="py-3 px-4">
-
                                 <span class="px-3 py-1 rounded-full text-xs font-bold <?= $badge ?>">
                                     <?= e($label) ?>
                                 </span>
-
                                 <?php if (!empty($s['check_in_time'])): ?>
                                     <div class="text-xs text-gray-400 mt-1">
-                                        Masuk:
-                                        <?= e(substr($s['check_in_time'], 0, 5)) ?>
+                                        Masuk: <?= e(substr($s['check_in_time'], 0, 5)) ?>
                                     </div>
                                 <?php endif; ?>
-
                             </td>
 
                             <!-- JURNAL -->
-
                             <td class="py-3 px-4">
-
                                 <div class="font-bold text-blue-600">
                                     <?= (int) ($s['total_jurnal'] ?? 0) ?>
-                                    <span class="text-xs text-gray-500 font-normal">
-                                        total
-                                    </span>
+                                    <span class="text-xs text-gray-500 font-normal">total</span>
                                 </div>
-
                                 <div class="text-xs text-gray-500">
-                                    Minggu ini:
-                                    <?= (int) ($s['jurnal_minggu_ini'] ?? 0) ?>
+                                    Minggu ini: <?= (int) ($s['jurnal_minggu_ini'] ?? 0) ?>
                                 </div>
-
                                 <?php if ((int) ($s['jurnal_hari_ini'] ?? 0) > 0): ?>
                                     <span class="inline-block mt-1 text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">
                                         Aktif hari ini
                                     </span>
                                 <?php endif; ?>
-
                             </td>
 
                             <!-- TUGAS -->
-
                             <td class="py-3 px-4">
-
                                 <div class="font-bold text-indigo-600">
                                     <?= (int) ($s['total_tugas'] ?? 0) ?>
-                                    <span class="text-xs text-gray-500 font-normal">
-                                        total
-                                    </span>
+                                    <span class="text-xs text-gray-500 font-normal">total</span>
                                 </div>
-
-                                <div class="text-xs text-green-600">
-                                    Selesai:
-                                    <?= (int) ($s['tugas_selesai'] ?? 0) ?>
-                                </div>
-
-                                <div class="text-xs text-yellow-600">
-                                    Berjalan:
-                                    <?= (int) ($s['tugas_berjalan'] ?? 0) ?>
-                                </div>
-
-                                <div class="text-xs text-gray-500">
-                                    Belum:
-                                    <?= (int) ($s['tugas_belum'] ?? 0) ?>
-                                </div>
-
+                                <div class="text-xs text-green-600">Selesai: <?= (int) ($s['tugas_selesai'] ?? 0) ?></div>
+                                <div class="text-xs text-yellow-600">Berjalan: <?= (int) ($s['tugas_berjalan'] ?? 0) ?></div>
+                                <div class="text-xs text-gray-500">Belum: <?= (int) ($s['tugas_belum'] ?? 0) ?></div>
                             </td>
 
                             <!-- AKTIVITAS TERAKHIR -->
-
                             <td class="py-3 px-4 text-xs text-gray-500">
                                 <?= e($lastJurnal) ?>
                             </td>
 
                             <!-- AKSI -->
-
                             <td class="py-3 px-4 text-right">
-
                                 <?php if (file_exists(__DIR__ . '/detail_siswa.php')): ?>
-
                                     <a
                                         href="detail_siswa.php?id=<?= (int) $s['id'] ?>"
                                         class="inline-block text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-1.5 rounded-lg font-semibold"
                                     >
                                         Detail →
                                     </a>
-
                                 <?php else: ?>
-
-                                    <span class="text-xs text-gray-400">
-                                        Detail belum tersedia
-                                    </span>
-
+                                    <span class="text-xs text-gray-400">Detail belum tersedia</span>
                                 <?php endif; ?>
-
                             </td>
-
                         </tr>
-
                     <?php endforeach; ?>
-
                 <?php endif; ?>
-
             </tbody>
-
         </table>
-
     </div>
 
     <!-- PAGINATION -->
-
     <?php if ($totalPages > 1): ?>
-
         <div class="flex items-center justify-between p-4 border-t border-gray-100 dark:border-gray-700 text-sm flex-wrap gap-2">
-
             <div class="text-gray-500">
                 Menampilkan <?= count($siswa) ?> dari <?= $totalRows ?> siswa
             </div>
 
             <div class="flex gap-1 flex-wrap">
-
                 <?php
                 $qs = $_GET;
 
                 for ($p = 1; $p <= $totalPages; $p++):
-
                     if (
                         $totalPages > 10 &&
                         $p > 3 &&
@@ -859,17 +741,13 @@ require_once __DIR__ . '/includes/header.php';
                         if ($p === 4) {
                             echo '<span class="px-2 py-1.5 text-gray-400">...</span>';
                         }
-
                         continue;
                     }
 
                     $qs['page'] = $p;
-
                     $url = 'monitoring.php?' . http_build_query($qs);
-
                     $active = $p === $page;
                 ?>
-
                     <a
                         href="<?= e($url) ?>"
                         class="px-3 py-1.5 rounded-lg <?= $active
@@ -878,15 +756,10 @@ require_once __DIR__ . '/includes/header.php';
                     >
                         <?= $p ?>
                     </a>
-
                 <?php endfor; ?>
-
             </div>
-
         </div>
-
     <?php endif; ?>
-
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

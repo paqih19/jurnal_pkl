@@ -1,4 +1,3 @@
-
 <?php
 // logout.php
 
@@ -40,9 +39,7 @@ try {
 // Hapus remember-me token
 if (isset($pdo) && $loggedOutUserId) {
     try {
-        $stmt = $pdo->prepare("
-            UPDATE users SET remember_token = NULL WHERE id = ?
-        ");
+        $stmt = $pdo->prepare("UPDATE users SET remember_token = NULL WHERE id = ?");
         $stmt->execute([$loggedOutUserId]);
     } catch (Throwable $e) {}
 }
@@ -81,15 +78,15 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 header('Expires: 0');
 
-$homeUrl  = $baseUrl . '/index.php';
+$homeUrl  = $baseUrl . '/index.php?logout=1';
 $loginUrl = $baseUrl . '/login.php';
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
 
     <title>Logout - <?= htmlspecialchars($appName) ?></title>
 
@@ -99,12 +96,8 @@ $loginUrl = $baseUrl . '/login.php';
         tailwind.config = {
             theme: {
                 extend: {
-                    colors: {
-                        primary: '#4F46E5'
-                    },
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif']
-                    }
+                    colors: { primary: '#4F46E5' },
+                    fontFamily: { sans: ['Inter', 'sans-serif'] }
                 }
             }
         };
@@ -115,21 +108,11 @@ $loginUrl = $baseUrl . '/login.php';
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', sans-serif;
-        }
+        * { box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; }
 
         .page-bg {
-            background: linear-gradient(
-                135deg,
-                #EEF2FF 0%,
-                #FAF5FF 50%,
-                #EFF6FF 100%
-            );
+            background: linear-gradient(135deg, #EEF2FF 0%, #FAF5FF 50%, #EFF6FF 100%);
         }
 
         .decor {
@@ -178,32 +161,20 @@ $loginUrl = $baseUrl . '/login.php';
             animation: spin .8s linear infinite;
         }
 
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        .progress-bar {
-            animation: progress 5s linear forwards;
-        }
+        .progress-bar { animation: progress 5s linear forwards; }
 
         @keyframes progress {
             from { width: 100%; }
             to { width: 0%; }
         }
 
-        .card-appear {
-            animation: appear .5s ease-out;
-        }
+        .card-appear { animation: appear .5s ease-out; }
 
         @keyframes appear {
-            from {
-                opacity: 0;
-                transform: translateY(15px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
@@ -217,7 +188,6 @@ $loginUrl = $baseUrl . '/login.php';
 
     <!-- Konten -->
     <main class="relative z-10 w-full max-w-md card-appear">
-
         <div class="glass-card rounded-3xl p-8 sm:p-10 text-center">
 
             <!-- Ikon logout -->
@@ -270,7 +240,6 @@ $loginUrl = $baseUrl . '/login.php';
 
             <!-- Tombol -->
             <div class="mt-6 flex flex-col gap-3">
-
                 <a href="<?= htmlspecialchars($homeUrl, ENT_QUOTES, 'UTF-8') ?>"
                    class="main-button flex items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-sm font-bold text-white">
                     Kembali ke Beranda
@@ -281,7 +250,6 @@ $loginUrl = $baseUrl . '/login.php';
                    class="rounded-xl border border-indigo-200 bg-white px-5 py-3 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-50">
                     Login Kembali
                 </a>
-
             </div>
 
             <div class="mt-7 border-t border-slate-100 pt-5">
@@ -289,9 +257,7 @@ $loginUrl = $baseUrl . '/login.php';
                     &copy; <?= date('Y') ?> <?= htmlspecialchars($appName) ?>
                 </p>
             </div>
-
         </div>
-
     </main>
 
     <script>

@@ -1,12 +1,17 @@
-
 <?php
 // obrolan.php
 require_once __DIR__ . '/includes/auth.php';
 requireLogin();
 
 $user = currentUser();
-$uid  = (int)$user['id'];
+$uid  = (int) $user['id'];
 $isPembimbing = isPembimbing();
+
+// Guard $pdo
+if (!isset($pdo) || !($pdo instanceof PDO)) {
+    http_response_code(500);
+    exit('Koneksi database tidak tersedia.');
+}
 
 // Deteksi tabel chat
 $hasChatTables = false;
@@ -14,7 +19,7 @@ $missingTables = [];
 
 try {
     foreach (['chat_rooms', 'chat_members', 'messages'] as $table) {
-        $exists = (bool)$pdo->query("SHOW TABLES LIKE " . $pdo->quote($table))->fetchColumn();
+        $exists = (bool) $pdo->query("SHOW TABLES LIKE " . $pdo->quote($table))->fetchColumn();
         if (!$exists) $missingTables[] = $table;
     }
     $hasChatTables = empty($missingTables);
@@ -44,7 +49,6 @@ if (!$hasChatTables) {
 require_once __DIR__ . '/includes/header.php';
 ?>
 
-
 <style>
     :root {
         --chat-primary: #4F46E5;
@@ -66,26 +70,19 @@ require_once __DIR__ . '/includes/header.php';
         box-shadow: 0 12px 35px rgba(0, 0, 0, .18);
     }
 
-    /* Latar percakapan */
     .chat-bg {
         background-color: #F8FAFC;
-        background-image:
-            radial-gradient(circle, rgba(79,70,229,.07) 1px, transparent 1px);
+        background-image: radial-gradient(circle, rgba(79,70,229,.07) 1px, transparent 1px);
         background-size: 22px 22px;
     }
 
     .dark .chat-bg {
         background-color: #111827;
-        background-image:
-            radial-gradient(circle, rgba(129,140,248,.08) 1px, transparent 1px);
+        background-image: radial-gradient(circle, rgba(129,140,248,.08) 1px, transparent 1px);
     }
 
-    /* Header dibuat lebih sederhana */
-    .chat-gradient {
-        background: #4F46E5;
-    }
+    .chat-gradient { background: #4F46E5; }
 
-    /* Bubble pesan */
     .bubble-out {
         background: #E9EAFE;
         color: #25245A;
@@ -138,7 +135,6 @@ require_once __DIR__ . '/includes/header.php';
         border-color: transparent #263247 transparent transparent;
     }
 
-    /* Daftar percakapan */
     .room-active {
         background: #EEF2FF;
         border-left: 3px solid #4F46E5;
@@ -155,7 +151,6 @@ require_once __DIR__ . '/includes/header.php';
         box-shadow: 0 2px 7px rgba(15,23,42,.12);
     }
 
-    /* Label tanggal */
     .date-chip {
         background: #E9EAFE;
         color: #4338CA;
@@ -168,11 +163,8 @@ require_once __DIR__ . '/includes/header.php';
         border-color: #3F4174;
     }
 
-    .quoted-bar {
-        border-left: 4px solid #6366F1;
-    }
+    .quoted-bar { border-left: 4px solid #6366F1; }
 
-    /* Scrollbar */
     #chat-box::-webkit-scrollbar,
     #room-list::-webkit-scrollbar,
     #member-list::-webkit-scrollbar {
@@ -192,29 +184,16 @@ require_once __DIR__ . '/includes/header.php';
         background: #4B5185;
     }
 
-    /* Tombol */
-    .chat-action {
-        transition: all .2s ease;
-    }
-
+    .chat-action { transition: all .2s ease; }
     .chat-action:hover {
         transform: translateY(-1px);
         filter: brightness(.96);
     }
 
-    #send-btn {
-        background: #4F46E5;
-    }
+    #send-btn { background: #4F46E5; }
+    #send-btn:hover { background: #4338CA; }
+    #send-btn:disabled { opacity: .45; }
 
-    #send-btn:hover {
-        background: #4338CA;
-    }
-
-    #send-btn:disabled {
-        opacity: .45;
-    }
-
-    /* Input */
     #chat-input:focus,
     #search-input:focus,
     #group-name:focus {
@@ -222,12 +201,16 @@ require_once __DIR__ . '/includes/header.php';
         box-shadow: 0 0 0 3px rgba(99,102,241,.12);
     }
 
-    /* Lampiran */
     .attach-file {
         background: #F1F3FF;
         border: 1px solid #E0E7FF;
         border-radius: 12px;
         color: inherit;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        text-decoration: none;
     }
 
     .dark .attach-file {
@@ -237,17 +220,21 @@ require_once __DIR__ . '/includes/header.php';
 
     .attach-file-icon {
         border-radius: 10px;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        flex-shrink: 0;
     }
 
-    /* Menu pesan */
     #context-menu {
         border-color: #E2E8F0;
         border-radius: 12px;
     }
 
-    .dark #context-menu {
-        border-color: #334155;
-    }
+    .dark #context-menu { border-color: #334155; }
 
     .menu-item:hover {
         background: #EEF2FF;
@@ -259,7 +246,6 @@ require_once __DIR__ . '/includes/header.php';
         color: #C7D2FE;
     }
 
-    /* Modal */
     #create-group-modal > div,
     #new-chat-modal > div {
         border: 1px solid #E2E8F0;
@@ -267,17 +253,12 @@ require_once __DIR__ . '/includes/header.php';
     }
 
     .dark #create-group-modal > div,
-    .dark #new-chat-modal > div {
-        border-color: #334155;
-    }
+    .dark #new-chat-modal > div { border-color: #334155; }
 
-    /* Animasi */
     .chat-action,
     .room-item,
     .user-item,
-    #send-btn {
-        transition: all .2s ease;
-    }
+    #send-btn { transition: all .2s ease; }
 
     .attach-img {
         max-width: 260px;
@@ -327,9 +308,7 @@ require_once __DIR__ . '/includes/header.php';
         display: inline-block;
     }
 
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     .caption-text {
         font-size: 13px;
@@ -337,9 +316,13 @@ require_once __DIR__ . '/includes/header.php';
         word-break: break-word;
     }
 
-    #preview-modal {
-        backdrop-filter: blur(8px);
+    .msg-hl {
+        outline: 2px solid #FBBF24;
+        outline-offset: 2px;
+        border-radius: 8px;
     }
+
+    #preview-modal { backdrop-filter: blur(8px); }
 
     @media (max-width: 767px) {
         .chat-shell {
@@ -347,13 +330,9 @@ require_once __DIR__ . '/includes/header.php';
             min-height: 450px;
             border-radius: 14px;
         }
-
-        .attach-img {
-            max-width: 210px;
-        }
+        .attach-img { max-width: 210px; }
     }
 </style>
-
 
 <div class="chat-shell relative flex overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
 
@@ -872,7 +851,6 @@ async function fetchMessages(reset = false) {
 
         const messages = await jsonResponse(res);
 
-        // Abaikan respons lama jika pengguna sudah pindah room.
         if (requestedRoomId !== currentRoomId) return;
 
         document.getElementById('loading-msg')?.remove();
@@ -1147,7 +1125,6 @@ chatForm.addEventListener('submit', async e => {
 
     const roomAtSubmit = currentRoomId;
 
-    // Mode edit pesan
     if (editingId) {
         const content = chatInput.value.trim();
         if (!content) return;
@@ -1192,11 +1169,7 @@ chatForm.addEventListener('submit', async e => {
     sendBtn.disabled = true;
 
     try {
-        const body = {
-            content,
-            room_id: roomAtSubmit
-        };
-
+        const body = { content, room_id: roomAtSubmit };
         if (replyTo) body.reply_to_id = replyTo.id;
 
         const res = await fetch(BASE_URL + '/api/obrolan_send.php', {
@@ -1282,7 +1255,6 @@ function openMenu(e, msgEl) {
             icon: '📋',
             action: async () => {
                 if (!content) return;
-
                 try {
                     await navigator.clipboard.writeText(content);
                 } catch {

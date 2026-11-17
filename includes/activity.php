@@ -11,18 +11,40 @@
 
 if (!function_exists('logActivity')) {
 
+    /**
+     * Catat aktivitas ke tabel activity_log.
+     *
+     * @param string      $aksi   Nama aksi (maks 50 karakter)
+     * @param string|null $detail Detail tambahan (maks 2000 karakter)
+     * @param int|null    $userId ID user (null = dari session)
+     */
     function logActivity(
         string $aksi,
         ?string $detail = null,
         ?int $userId = null
     ): void {
-
         global $pdo;
 
         try {
-
             // Pastikan koneksi database tersedia
             if (!isset($pdo) || !$pdo instanceof PDO) {
+                return;
+            }
+
+            // Cek tabel activity_log ada (cache per request)
+            static $tableExists = null;
+
+            if ($tableExists === null) {
+                try {
+                    $pdo->query("SELECT 1 FROM activity_log LIMIT 1");
+                    $tableExists = true;
+                } catch (Throwable $e) {
+                    $tableExists = false;
+                    error_log('Activity Log: tabel activity_log tidak tersedia.');
+                }
+            }
+
+            if (!$tableExists) {
                 return;
             }
 
@@ -32,36 +54,42 @@ if (!function_exists('logActivity')) {
             );
 
             $username = $_SESSION['name'] ?? $_SESSION['nama'] ?? null;
-            $role = $_SESSION['role'] ?? null;
+            $role     = $_SESSION['role'] ?? null;
 
             // Ambil data dari currentUser() jika tersedia
             if (function_exists('currentUser')) {
                 $current = currentUser();
 
                 if (is_array($current)) {
-                    $uid = $uid ?? (
-                        (int)($current['id'] ?? 0) ?: null
-                    );
-
+                    $uid      = $uid ?? ((int)($current['id'] ?? 0) ?: null);
                     $username = $username ?? ($current['name'] ?? null);
-                    $role = $role ?? ($current['role'] ?? null);
+                    $role     = $role ?? ($current['role'] ?? null);
                 }
             }
 
-            // Batasi panjang data
-            $aksi = substr(trim($aksi), 0, 50);
+            // Batasi panjang data (pakai mb_substr agar aman untuk UTF-8)
+            $substr = function_exists('mb_substr') ? 'mb_substr' : 'substr';
+
+            $aksi = $substr(trim($aksi), 0, 50);
+            $aksi = $aksi !== '' ? $aksi : 'unknown';
 
             $detail = $detail !== null
-                ? substr(trim($detail), 0, 2000)
+                ? $substr(trim($detail), 0, 2000)
                 : null;
+
+            $detail = ($detail === '') ? null : $detail;
 
             $username = $username !== null
-                ? substr(trim($username), 0, 100)
+                ? $substr(trim((string)$username), 0, 100)
                 : null;
 
+            $username = ($username === '') ? null : $username;
+
             $role = $role !== null
-                ? substr(trim($role), 0, 30)
+                ? $substr(trim((string)$role), 0, 30)
                 : null;
+
+            $role = ($role === '') ? null : $role;
 
             // Ambil IP dari koneksi langsung
             // Tidak menggunakan X-Forwarded-For karena dapat dipalsukan
@@ -75,22 +103,15 @@ if (!function_exists('logActivity')) {
 
             // Informasi browser
             $userAgent = substr(
-                $_SERVER['HTTP_USER_AGENT'] ?? '',
-                0,
-                255
-            ) ?: null;
+                (string)($_SERVER['HTTP_USER_AGENT'] ?? ''),
+                0, 255
+            );
+
+            $userAgent = $userAgent !== '' ? $userAgent : null;
 
             // Simpan aktivitas
             $sql = "INSERT INTO activity_log
-                    (
-                        user_id,
-                        username,
-                        role,
-                        aksi,
-                        detail,
-                        ip,
-                        user_agent
-                    )
+                    (user_id, username, role, aksi, detail, ip, user_agent)
                     VALUES (?, ?, ?, ?, ?, ?, ?)";
 
             $stmt = $pdo->prepare($sql);
@@ -106,10 +127,8 @@ if (!function_exists('logActivity')) {
             ]);
 
         } catch (Throwable $e) {
-
             // Catat kegagalan tanpa mengganggu halaman aplikasi
             error_log('Activity Log Error: ' . $e->getMessage());
-
         }
     }
 }

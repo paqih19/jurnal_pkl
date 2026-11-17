@@ -1,4 +1,3 @@
-
 <?php
 // tasks.php
 require_once __DIR__ . '/includes/auth.php';
@@ -12,8 +11,10 @@ $role = $user['role'] ?? '';
 $isPembimbing = in_array($role, ['pembimbing', 'teacher', 'admin'], true);
 $today = date('Y-m-d');
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+// Guard $pdo
+if (!isset($pdo) || !($pdo instanceof PDO)) {
+    http_response_code(500);
+    exit('Koneksi database tidak tersedia.');
 }
 
 // =====================================================
@@ -29,13 +30,12 @@ function taskCsrfToken(): string {
     if (empty($_SESSION['csrf_tasks'])) {
         $_SESSION['csrf_tasks'] = bin2hex(random_bytes(32));
     }
-
     return $_SESSION['csrf_tasks'];
 }
 
 function taskVerifyCsrf(): bool {
     return isset($_POST['csrf'], $_SESSION['csrf_tasks'])
-        && hash_equals($_SESSION['csrf_tasks'], $_POST['csrf']);
+        && hash_equals($_SESSION['csrf_tasks'], (string) $_POST['csrf']);
 }
 
 function taskRedirect(): never {
@@ -50,6 +50,10 @@ function taskFlashError(string $message): never {
 function taskFlashSuccess(string $message): never {
     setFlash('success', $message);
     taskRedirect();
+}
+
+function taskStrlen(string $value): int {
+    return function_exists('mb_strlen') ? mb_strlen($value) : strlen($value);
 }
 
 // =====================================================
@@ -79,38 +83,35 @@ $hasTeacher     = isset($taskCols['teacher_name']);
 $hasDeadline    = isset($taskCols['deadline']);
 $hasCreatedAt   = isset($taskCols['created_at']);
 $hasUpdatedAt   = isset($taskCols['updated_at']);
+$hasAssignedTo  = isset($taskCols['assigned_to']);
 
 // =====================================================
 // VALIDASI INPUT
 // =====================================================
-function validateTaskInput(array $post, array $columns): array {
-    $title = trim($post['title'] ?? '');
-    $desc = trim($post['description'] ?? '');
-    $teacher = trim($post['teacher_name'] ?? '');
+function validateTaskInput(array $post): array {
+    $title    = trim($post['title'] ?? '');
+    $desc     = trim($post['description'] ?? '');
+    $teacher  = trim($post['teacher_name'] ?? '');
     $deadline = trim($post['deadline'] ?? '');
-    $status = $post['status'] ?? 'todo';
+    $status   = $post['status'] ?? 'todo';
 
     $errors = [];
 
-    if (mb_strlen($title) < 3) {
+    if (taskStrlen($title) < 3) {
         $errors[] = 'Judul tugas minimal 3 karakter.';
     }
-
-    if (mb_strlen($title) > 150) {
+    if (taskStrlen($title) > 150) {
         $errors[] = 'Judul tugas maksimal 150 karakter.';
     }
-
-    if (mb_strlen($desc) > 2000) {
+    if (taskStrlen($desc) > 2000) {
         $errors[] = 'Deskripsi maksimal 2000 karakter.';
     }
-
-    if (mb_strlen($teacher) > 100) {
+    if (taskStrlen($teacher) > 100) {
         $errors[] = 'Nama pembimbing maksimal 100 karakter.';
     }
 
     if ($deadline !== '') {
         $date = DateTime::createFromFormat('Y-m-d', $deadline);
-
         if (!$date || $date->format('Y-m-d') !== $deadline) {
             $errors[] = 'Tanggal deadline tidak valid.';
         }
@@ -137,19 +138,18 @@ function validateTaskInput(array $post, array $columns): array {
 // CEK HAK AKSES TUGAS
 // =====================================================
 function taskCanManage(array $task, int $uid, bool $isPembimbing): bool {
-    return $isPembimbing || (int)$task['created_by'] === $uid;
+    return $isPembimbing || (int)($task['created_by'] ?? 0) === $uid;
 }
 
 // =====================================================
 // TAMBAH TUGAS
 // =====================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add') {
-
     if (!taskVerifyCsrf()) {
         taskFlashError('Sesi kedaluwarsa. Silakan coba lagi.');
     }
 
-    $validation = validateTaskInput($_POST, $taskCols);
+    $validation = validateTaskInput($_POST);
 
     if (!$validation['ok']) {
         taskFlashError(implode(' ', $validation['errors']));
@@ -158,27 +158,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     $data = $validation['data'];
 
     $fields = ['title', 'created_by', 'status'];
-    $values = [
-        $data['title'],
-        $uid,
-        $data['status']
-    ];
+    $values = [$data['title'], $uid, $data['status']];
 
     if ($hasDescription) {
         $fields[] = 'description';
         $values[] = $data['description'];
     }
-
     if ($hasTeacher) {
         $fields[] = 'teacher_name';
         $values[] = $data['teacher_name'];
     }
-
     if ($hasDeadline) {
         $fields[] = 'deadline';
         $values[] = $data['deadline'];
     }
-
     if ($hasCreatedAt) {
         $fields[] = 'created_at';
         $values[] = date('Y-m-d H:i:s');
@@ -188,10 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
     $fieldList = implode(', ', $fields);
 
     try {
-        $stmt = $pdo->prepare(
-            "INSERT INTO tasks ($fieldList) VALUES ($placeholders)"
-        );
-
+        $stmt = $pdo->prepare("INSERT INTO tasks ($fieldList) VALUES ($placeholders)");
         $stmt->execute($values);
 
         if (function_exists('logActivity')) {
@@ -209,18 +199,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add')
 // EDIT TUGAS
 // =====================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit') {
-
     if (!taskVerifyCsrf()) {
         taskFlashError('Sesi kedaluwarsa. Silakan coba lagi.');
     }
 
     $id = (int)($_POST['id'] ?? 0);
-    $validation = validateTaskInput($_POST, $taskCols);
+    $validation = validateTaskInput($_POST);
 
     if (!$id || !$validation['ok']) {
-        taskFlashError(
-            implode(' ', $validation['errors']) ?: 'Data tugas tidak valid.'
-        );
+        taskFlashError(implode(' ', $validation['errors']) ?: 'Data tugas tidak valid.');
     }
 
     $check = $pdo->prepare("SELECT * FROM tasks WHERE id = ?");
@@ -244,17 +231,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
         $sets[] = 'description = ?';
         $params[] = $data['description'];
     }
-
     if ($hasTeacher) {
         $sets[] = 'teacher_name = ?';
         $params[] = $data['teacher_name'];
     }
-
     if ($hasDeadline) {
         $sets[] = 'deadline = ?';
         $params[] = $data['deadline'];
     }
-
     if ($hasUpdatedAt) {
         $sets[] = 'updated_at = NOW()';
     }
@@ -262,10 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
     $params[] = $id;
 
     try {
-        $stmt = $pdo->prepare(
-            'UPDATE tasks SET ' . implode(', ', $sets) . ' WHERE id = ?'
-        );
-
+        $stmt = $pdo->prepare('UPDATE tasks SET ' . implode(', ', $sets) . ' WHERE id = ?');
         $stmt->execute($params);
 
         if (function_exists('logActivity')) {
@@ -283,7 +264,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit'
 // HAPUS TUGAS
 // =====================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
-
     if (!taskVerifyCsrf()) {
         taskFlashError('Sesi kedaluwarsa. Silakan coba lagi.');
     }
@@ -332,13 +312,12 @@ $order = "CASE status
 if ($hasDeadline) {
     $order .= ", deadline IS NULL, deadline ASC";
 }
-
 if ($hasCreatedAt) {
     $order .= ", created_at DESC";
 }
 
 $stmt = $pdo->query("SELECT * FROM tasks ORDER BY $order");
-$tasks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$tasks = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
 // =====================================================
 // STATISTIK
@@ -354,10 +333,7 @@ $stats = [
 
 foreach ($tasks as $task) {
     $status = $task['status'] ?? 'todo';
-
-    if (isset($stats[$status])) {
-        $stats[$status]++;
-    }
+    if (isset($stats[$status])) $stats[$status]++;
 
     $deadline = $task['deadline'] ?? null;
 
@@ -384,28 +360,25 @@ function taskPriority(array $task, string $today): array {
 
     $deadline = $task['deadline'] ?? '';
 
-    if (!$deadline) {
-        return ['Tanpa Tenggat', 'slate', '—'];
-    }
+    if (!$deadline) return ['Tanpa Tenggat', 'slate', '—'];
 
     $days = (int)((strtotime($deadline) - strtotime($today)) / 86400);
 
-    if ($days < 0) return ['Terlewat', 'red', '!'];
+    if ($days < 0)   return ['Terlewat', 'red', '!'];
     if ($days === 0) return ['Hari Ini', 'orange', '•'];
-    if ($days <= 2) return ['Mendesak', 'orange', '•'];
-    if ($days <= 7) return ['Segera', 'purple', '•'];
+    if ($days <= 2)  return ['Mendesak', 'orange', '•'];
+    if ($days <= 7)  return ['Segera', 'purple', '•'];
 
     return ['Normal', 'blue', '•'];
 }
 
 function taskDeadlineLabel(array $task, string $today): string {
     $deadline = $task['deadline'] ?? '';
-
     if (!$deadline) return 'Tanpa deadline';
 
     $days = (int)((strtotime($deadline) - strtotime($today)) / 86400);
 
-    if ($days < 0) return abs($days) . ' hari terlambat';
+    if ($days < 0)  return abs($days) . ' hari terlambat';
     if ($days === 0) return 'Deadline hari ini';
     if ($days === 1) return 'Deadline besok';
 
@@ -425,9 +398,7 @@ require_once __DIR__ . '/includes/header.php';
 ?>
 
 <style>
-.task-card {
-    transition: transform .2s ease, box-shadow .2s ease;
-}
+.task-card { transition: transform .2s ease, box-shadow .2s ease; }
 .task-card:hover {
     transform: translateY(-3px);
     box-shadow: 0 12px 25px rgba(79,70,229,.09);
@@ -441,16 +412,12 @@ require_once __DIR__ . '/includes/header.php';
 .dark .task-soft {
     background: linear-gradient(135deg,#1E1B4B 0%,#312E81 55%,#172554 100%);
 }
-.kanban-col {
-    min-height: 280px;
-}
+.kanban-col { min-height: 280px; }
 .drag-over {
     background: rgba(99,102,241,.10);
     outline: 2px dashed #6366f1;
 }
-.dragging {
-    opacity: .45;
-}
+.dragging { opacity: .45; }
 .line-clamp-2 {
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -469,11 +436,9 @@ require_once __DIR__ . '/includes/header.php';
                     <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
                     MANAJEMEN KEGIATAN PKL
                 </div>
-
                 <h1 class="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white">
                     Daftar Tugas
                 </h1>
-
                 <p class="text-sm text-slate-600 dark:text-slate-300 mt-2">
                     <?= $isPembimbing
                         ? 'Pantau dan kelola tugas seluruh peserta PKL.'
@@ -497,7 +462,6 @@ require_once __DIR__ . '/includes/header.php';
 
     <!-- STATISTIK -->
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-
         <?php
         $statCards = [
             ['Total Tugas', $stats['total'], 'indigo'],
@@ -508,18 +472,14 @@ require_once __DIR__ . '/includes/header.php';
             ['Terlambat', $stats['terlewat'], 'red']
         ];
         ?>
-
         <?php foreach ($statCards as $card): ?>
             <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-100 dark:border-slate-700 shadow-sm">
-                <p class="text-xs text-slate-500 dark:text-slate-400">
-                    <?= taskEscape($card[0]) ?>
-                </p>
+                <p class="text-xs text-slate-500 dark:text-slate-400"><?= taskEscape($card[0]) ?></p>
                 <p class="text-2xl font-bold mt-2 text-<?= $card[2] ?>-600 dark:text-<?= $card[2] ?>-400">
                     <?= (int)$card[1] ?>
                 </p>
             </div>
         <?php endforeach; ?>
-
     </div>
 
     <!-- PROGRESS -->
@@ -531,10 +491,7 @@ require_once __DIR__ . '/includes/header.php';
                     Persentase tugas yang telah diselesaikan
                 </p>
             </div>
-
-            <span class="text-xl font-bold text-indigo-600 dark:text-indigo-400">
-                <?= $progress ?>%
-            </span>
+            <span class="text-xl font-bold text-indigo-600 dark:text-indigo-400"><?= $progress ?>%</span>
         </div>
 
         <div class="h-3 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
@@ -550,7 +507,6 @@ require_once __DIR__ . '/includes/header.php';
     <!-- FILTER -->
     <div class="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-100 dark:border-slate-700">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-
             <div class="md:col-span-2">
                 <input type="search" id="search-input"
                     placeholder="Cari judul, pembimbing, atau deskripsi..."
@@ -574,13 +530,11 @@ require_once __DIR__ . '/includes/header.php';
                 <option value="title">Urut: Judul</option>
                 <option value="created">Urut: Terbaru</option>
             </select>
-
         </div>
     </div>
 
     <!-- LIST VIEW -->
     <div id="list-view" class="hidden grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-
         <?php foreach ($tasks as $t):
             $id = (int)$t['id'];
             $status = $t['status'] ?? 'todo';
@@ -591,7 +545,6 @@ require_once __DIR__ . '/includes/header.php';
             [$priority, $priorityColor, $priorityIcon] = taskPriority($t, $today);
             $overdue = $status !== 'done' && $deadline && $deadline < $today;
         ?>
-
         <div class="task-card bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 overflow-hidden"
             data-task-card
             data-id="<?= $id ?>"
@@ -607,14 +560,13 @@ require_once __DIR__ . '/includes/header.php';
                     <h3 class="font-bold text-slate-800 dark:text-white line-clamp-2">
                         <?= taskEscape($t['title']) ?>
                     </h3>
-
                     <span class="text-xs px-2 py-1 rounded-full bg-<?= $priorityColor ?>-100 text-<?= $priorityColor ?>-700 dark:bg-<?= $priorityColor ?>-900/30 dark:text-<?= $priorityColor ?>-300 whitespace-nowrap">
                         <?= taskEscape($priority) ?>
                     </span>
                 </div>
 
                 <div class="text-xs text-slate-500 dark:text-slate-400 mt-3 space-y-2">
-                    <p> Pembimbing: <?= taskEscape($teacher ?: 'Belum ditentukan') ?></p>
+                    <p>Pembimbing: <?= taskEscape($teacher ?: 'Belum ditentukan') ?></p>
                     <p class="<?= $overdue ? 'text-red-500 font-semibold' : '' ?>">
                         Deadline: <?= taskEscape(taskDeadlineLabel($t, $today)) ?>
                     </p>
@@ -628,7 +580,6 @@ require_once __DIR__ . '/includes/header.php';
                 <?php endif; ?>
 
                 <div class="border-t border-slate-100 dark:border-slate-700 mt-4 pt-3 flex items-center justify-between gap-2">
-
                     <select class="task-status-select text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 text-slate-700 dark:text-white px-2 py-2"
                         data-id="<?= $id ?>"
                         <?= !$canManage ? 'disabled title="Hanya pembuat tugas atau pembimbing yang dapat mengubah status."' : '' ?>>
@@ -643,7 +594,6 @@ require_once __DIR__ . '/includes/header.php';
                             class="px-3 py-2 text-xs rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-100">
                             Edit
                         </button>
-
                         <button type="button"
                             onclick='confirmDelete(<?= $id ?>, <?= json_encode($t['title'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP) ?>)'
                             class="px-3 py-2 text-xs rounded-lg bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-300 hover:bg-red-100">
@@ -651,18 +601,14 @@ require_once __DIR__ . '/includes/header.php';
                         </button>
                     </div>
                     <?php endif; ?>
-
                 </div>
             </div>
         </div>
-
         <?php endforeach; ?>
-
     </div>
 
     <!-- KANBAN VIEW -->
     <div id="kanban-view" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-
         <?php
         $columns = [
             'todo' => ['Belum Dikerjakan', 'border-red-200 dark:border-red-900/50'],
@@ -672,7 +618,6 @@ require_once __DIR__ . '/includes/header.php';
         ?>
 
         <?php foreach ($columns as $status => $column): ?>
-
         <div class="kanban-col bg-slate-50 dark:bg-slate-800/70 rounded-xl p-3 border <?= $column[1] ?>"
             data-kanban-column="<?= $status ?>">
 
@@ -680,16 +625,13 @@ require_once __DIR__ . '/includes/header.php';
                 <h3 class="font-bold text-sm text-slate-700 dark:text-white">
                     <?= taskEscape($column[0]) ?>
                 </h3>
-
                 <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300"
                     data-count="<?= $status ?>">
                     <?= count(array_filter($tasks, fn($t) => ($t['status'] ?? '') === $status)) ?>
                 </span>
             </div>
 
-            <div class="kanban-drop flex flex-col gap-3 min-h-48"
-                data-status="<?= $status ?>">
-
+            <div class="kanban-drop flex flex-col gap-3 min-h-48" data-status="<?= $status ?>">
                 <?php foreach ($tasks as $t):
                     if (($t['status'] ?? '') !== $status) continue;
 
@@ -701,7 +643,6 @@ require_once __DIR__ . '/includes/header.php';
                     $overdue = $status !== 'done' && $deadline && $deadline < $today;
                     [$priority, $priorityColor, $priorityIcon] = taskPriority($t, $today);
                 ?>
-
                 <div class="task-card bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-100 dark:border-slate-700 shadow-sm"
                     data-task-card
                     data-id="<?= $id ?>"
@@ -715,7 +656,6 @@ require_once __DIR__ . '/includes/header.php';
                         <h4 class="font-semibold text-sm text-slate-800 dark:text-white line-clamp-2">
                             <?= taskEscape($t['title']) ?>
                         </h4>
-
                         <span class="text-xs text-indigo-500 whitespace-nowrap">
                             <?= taskEscape($priorityIcon) ?>
                         </span>
@@ -735,7 +675,6 @@ require_once __DIR__ . '/includes/header.php';
                             class="text-xs text-indigo-600 dark:text-indigo-300 hover:underline">
                             Edit
                         </button>
-
                         <button type="button"
                             onclick='confirmDelete(<?= $id ?>, <?= json_encode($t['title'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP) ?>)'
                             class="text-xs text-red-500 hover:underline">
@@ -743,16 +682,11 @@ require_once __DIR__ . '/includes/header.php';
                         </button>
                     </div>
                     <?php endif; ?>
-
                 </div>
-
                 <?php endforeach; ?>
-
             </div>
         </div>
-
         <?php endforeach; ?>
-
     </div>
 
     <!-- EMPTY STATE -->
@@ -775,12 +709,10 @@ require_once __DIR__ . '/includes/header.php';
                 <h3 id="modal-title" class="text-lg font-bold text-white">Tambah Tugas</h3>
                 <p class="text-xs text-indigo-100 mt-1">Lengkapi informasi tugas PKL</p>
             </div>
-
             <button type="button" onclick="closeModal()" class="text-white text-2xl">&times;</button>
         </div>
 
         <form method="POST" id="task-form" class="p-6 space-y-4">
-
             <input type="hidden" name="csrf" value="<?= taskEscape(taskCsrfToken()) ?>">
             <input type="hidden" name="action" id="form-action" value="add">
             <input type="hidden" name="id" id="form-id">
@@ -789,20 +721,17 @@ require_once __DIR__ . '/includes/header.php';
                 <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
                     Nama Tugas *
                 </label>
-
                 <input type="text" name="title" id="form-title" required minlength="3" maxlength="150"
                     placeholder="Contoh: Membuat laporan kegiatan"
                     class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
                 <?php if ($hasTeacher): ?>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
                         Diberikan Oleh
                     </label>
-
                     <input type="text" name="teacher_name" id="form-teacher" maxlength="100"
                         placeholder="Nama pembimbing"
                         class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500">
@@ -814,19 +743,14 @@ require_once __DIR__ . '/includes/header.php';
                     <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
                         Deadline
                     </label>
-
                     <input type="date" name="deadline" id="form-deadline"
                         class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500">
                 </div>
                 <?php endif; ?>
-
             </div>
 
             <div>
-                <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                    Status
-                </label>
-
+                <label class="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Status</label>
                 <select name="status" id="form-status"
                     class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500">
                     <option value="todo">Belum Dikerjakan</option>
@@ -838,12 +762,9 @@ require_once __DIR__ . '/includes/header.php';
             <?php if ($hasDescription): ?>
             <div>
                 <div class="flex justify-between mb-2">
-                    <label class="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                        Deskripsi
-                    </label>
+                    <label class="text-sm font-semibold text-slate-700 dark:text-slate-300">Deskripsi</label>
                     <span id="desc-count" class="text-xs text-slate-400">0 / 2000</span>
                 </div>
-
                 <textarea name="description" id="form-desc" rows="4" maxlength="2000"
                     placeholder="Tuliskan detail pekerjaan..."
                     class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 dark:bg-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
@@ -855,13 +776,11 @@ require_once __DIR__ . '/includes/header.php';
                     class="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-semibold text-sm">
                     Batal
                 </button>
-
                 <button type="submit"
                     class="task-gradient px-5 py-2.5 rounded-xl text-white font-semibold text-sm">
                     Simpan Tugas
                 </button>
             </div>
-
         </form>
     </div>
 </div>
@@ -869,15 +788,10 @@ require_once __DIR__ . '/includes/header.php';
 <!-- MODAL HAPUS -->
 <div id="delete-modal" class="hidden fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm items-center justify-center p-4">
     <div class="bg-white dark:bg-slate-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl">
-
         <div class="w-14 h-14 rounded-full bg-red-50 dark:bg-red-900/30 text-red-500 flex items-center justify-center text-2xl mx-auto mb-4">
             !
         </div>
-
-        <h3 class="font-bold text-lg text-center text-slate-800 dark:text-white">
-            Hapus Tugas?
-        </h3>
-
+        <h3 class="font-bold text-lg text-center text-slate-800 dark:text-white">Hapus Tugas?</h3>
         <p id="delete-task-name" class="text-sm text-center text-slate-500 dark:text-slate-400 mt-2 mb-6"></p>
 
         <form method="POST" class="flex gap-2">
@@ -889,7 +803,6 @@ require_once __DIR__ . '/includes/header.php';
                 class="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-semibold text-sm">
                 Batal
             </button>
-
             <button type="submit"
                 class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-semibold text-sm">
                 Ya, Hapus
@@ -1068,7 +981,6 @@ function showToast(message, type = 'success') {
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transition = 'opacity .3s';
-
         setTimeout(() => toast.remove(), 300);
     }, 2600);
 }
@@ -1100,20 +1012,17 @@ async function updateStatus(id, status, element = null) {
         }
 
         const task = TASKS_DATA.find(item => item.id === Number(id));
-
         if (task) task.status = status;
 
         showToast('Status tugas berhasil diperbarui.');
 
         // Muat ulang agar posisi kartu, statistik, dan progress sinkron.
         setTimeout(() => window.location.reload(), 500);
-
     } catch (error) {
         showToast(error.message || 'Koneksi bermasalah.', 'error');
 
         if (element) {
             element.disabled = false;
-
             const task = TASKS_DATA.find(item => item.id === Number(id));
             if (task) element.value = task.status;
         }
@@ -1165,7 +1074,6 @@ function filterTasks() {
         }
 
         const visible = matchSearch && matchStatus;
-
         card.style.display = visible ? '' : 'none';
 
         if (visible) visibleCount++;
@@ -1178,17 +1086,13 @@ function filterTasks() {
                 const db = b.dataset.deadline || '9999-12-31';
                 return da.localeCompare(db);
             }
-
             if (sortBy === 'title') {
                 return (a.dataset.search || '').localeCompare(b.dataset.search || '');
             }
-
             if (sortBy === 'created') {
                 return (b.dataset.created || '').localeCompare(a.dataset.created || '');
             }
-
             const order = {todo: 1, doing: 2, done: 3};
-
             return (order[a.dataset.status] || 4) - (order[b.dataset.status] || 4);
         });
 
@@ -1202,7 +1106,6 @@ function filterTasks() {
             .filter(card => card.style.display !== 'none').length;
 
         const badge = document.querySelector(`[data-count="${column.dataset.status}"]`);
-
         if (badge) badge.textContent = count;
     });
 }
@@ -1262,7 +1165,6 @@ document.querySelectorAll('.kanban-drop').forEach(column => {
         draggedCard.dataset.status = newStatus;
 
         const task = TASKS_DATA.find(item => item.id === Number(id));
-
         if (task) task.status = newStatus;
 
         updateKanbanCounts();
@@ -1274,7 +1176,6 @@ function updateKanbanCounts() {
     document.querySelectorAll('.kanban-drop').forEach(column => {
         const count = column.querySelectorAll('[data-task-card]').length;
         const badge = document.querySelector(`[data-count="${column.dataset.status}"]`);
-
         if (badge) badge.textContent = count;
     });
 }

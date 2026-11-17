@@ -4,6 +4,16 @@
 require_once __DIR__ . '/../config/db.php';
 
 // ==================================================
+// KONFIGURASI FALLBACK
+// ==================================================
+if (!defined('BASE_URL')) {
+    define('BASE_URL', '');
+}
+if (!defined('APP_NAME')) {
+    define('APP_NAME', 'Jurnal PKL');
+}
+
+// ==================================================
 // ESCAPE HTML
 // ==================================================
 if (!function_exists('e')) {
@@ -29,14 +39,26 @@ if (!function_exists('redirect')) {
     {
         $path = trim((string)$path);
 
-        // Cegah redirect ke URL eksternal yang tidak diinginkan
+        if ($path === '') {
+            $path = 'dashboard.php';
+        }
+
+        // URL absolut dengan host lain → fallback ke dashboard
         if (preg_match('#^https?://#i', $path)) {
-            $baseHost = parse_url(BASE_URL, PHP_URL_HOST);
+            $baseHost   = parse_url(BASE_URL, PHP_URL_HOST);
             $targetHost = parse_url($path, PHP_URL_HOST);
 
-            if (!$baseHost || strtolower((string)$baseHost) !== strtolower((string)$targetHost)) {
+            if (
+                !$baseHost ||
+                strtolower((string)$baseHost) !== strtolower((string)$targetHost)
+            ) {
                 $path = 'dashboard.php';
             }
+        }
+
+        // Cegah header injection (newline)
+        if (preg_match('/[\r\n]/', $path)) {
+            $path = 'dashboard.php';
         }
 
         if (preg_match('#^https?://#i', $path)) {
@@ -60,7 +82,7 @@ if (!function_exists('setFlash')) {
     {
         $_SESSION['flash'] = [
             'type' => (string)$type,
-            'msg' => (string)$msg
+            'msg'  => (string)$msg,
         ];
     }
 }
@@ -86,18 +108,18 @@ if (!function_exists('tanggalIndo')) {
     function tanggalIndo($date): string
     {
         $bulan = [
-            1 => 'Januari',
-            'Februari',
-            'Maret',
-            'April',
-            'Mei',
-            'Juni',
-            'Juli',
-            'Agustus',
-            'September',
-            'Oktober',
-            'November',
-            'Desember'
+            1  => 'Januari',
+            2  => 'Februari',
+            3  => 'Maret',
+            4  => 'April',
+            5  => 'Mei',
+            6  => 'Juni',
+            7  => 'Juli',
+            8  => 'Agustus',
+            9  => 'September',
+            10 => 'Oktober',
+            11 => 'November',
+            12 => 'Desember',
         ];
 
         if (!$date) {
@@ -132,14 +154,13 @@ if (!function_exists('waktuChat')) {
             return '-';
         }
 
-        if (date('Y-m-d', $timestamp) === date('Y-m-d')) {
+        $day = date('Y-m-d', $timestamp);
+
+        if ($day === date('Y-m-d')) {
             return date('H:i', $timestamp);
         }
 
-        if (
-            date('Y-m-d', $timestamp) ===
-            date('Y-m-d', strtotime('-1 day'))
-        ) {
+        if ($day === date('Y-m-d', strtotime('-1 day'))) {
             return 'Kemarin ' . date('H:i', $timestamp);
         }
 
@@ -165,22 +186,23 @@ if (!function_exists('timeAgo')) {
 
         $diff = time() - $timestamp;
 
-        if ($diff < 60) {
+        // Waktu di masa depan → tampilkan "baru saja"
+        if ($diff < 0) {
             return 'baru saja';
         }
 
+        if ($diff < 60) {
+            return 'baru saja';
+        }
         if ($diff < 3600) {
             return floor($diff / 60) . ' menit lalu';
         }
-
         if ($diff < 86400) {
             return floor($diff / 3600) . ' jam lalu';
         }
-
         if ($diff < 2592000) {
             return floor($diff / 86400) . ' hari lalu';
         }
-
         if ($diff < 31536000) {
             return floor($diff / 2592000) . ' bulan lalu';
         }
@@ -200,15 +222,12 @@ if (!function_exists('formatBytes')) {
         if ($bytes <= 0) {
             return '0 B';
         }
-
         if ($bytes < 1024) {
             return $bytes . ' B';
         }
-
         if ($bytes < 1048576) {
             return round($bytes / 1024, 1) . ' KB';
         }
-
         if ($bytes < 1073741824) {
             return round($bytes / 1048576, 1) . ' MB';
         }
@@ -231,7 +250,7 @@ if (!function_exists('initials')) {
 
         $parts = preg_split('/\s+/', $name);
 
-        if (count($parts) >= 2) {
+        if (is_array($parts) && count($parts) >= 2) {
             return mb_strtoupper(
                 mb_substr($parts[0], 0, 1) .
                 mb_substr($parts[1], 0, 1)
@@ -261,26 +280,21 @@ if (!function_exists('avatarUrl')) {
             // Cegah path traversal
             $filename = basename($photo);
 
-            if (
-                $filename !== '' &&
-                defined('UPLOAD_DIR') &&
-                defined('UPLOAD_URL') &&
-                is_file(UPLOAD_DIR . $filename)
-            ) {
-                return rtrim(UPLOAD_URL, '/') . '/' .
-                    rawurlencode($filename);
-            }
+            if ($filename !== '') {
+                if (defined('UPLOAD_DIR') && is_file(UPLOAD_DIR . $filename)) {
+                    return rtrim(UPLOAD_URL, '/') . '/' . rawurlencode($filename);
+                }
 
-            if (defined('UPLOAD_URL')) {
-                return rtrim(UPLOAD_URL, '/') . '/' .
-                    rawurlencode($filename);
+                if (defined('UPLOAD_URL')) {
+                    return rtrim(UPLOAD_URL, '/') . '/' . rawurlencode($filename);
+                }
             }
         }
 
         return 'https://ui-avatars.com/api/?name=' .
             urlencode((string)($name ?: 'User')) .
-            '&background=EEF2FF&color=4F46E5&size=' .
-            $size . '&bold=true';
+            '&background=EEF2FF&color=4F46E5&size=' . $size .
+            '&bold=true';
     }
 }
 
@@ -290,14 +304,14 @@ if (!function_exists('avatarUrl')) {
 if (!function_exists('strLimit')) {
     function strLimit($str, $limit = 50, $end = '...'): string
     {
-        $str = trim((string)($str ?? ''));
+        $str   = trim((string)($str ?? ''));
         $limit = max(0, (int)$limit);
 
         if (mb_strlen($str) <= $limit) {
             return $str;
         }
 
-        $end = (string)$end;
+        $end       = (string)$end;
         $available = max(0, $limit - mb_strlen($end));
 
         return mb_substr($str, 0, $available) . $end;
@@ -322,11 +336,11 @@ if (!function_exists('unreadChatCount')) {
 
         global $pdo;
 
-        try {
-            if (!isset($pdo) || !$pdo instanceof PDO) {
-                return $cache = 0;
-            }
+        if (!isset($pdo) || !($pdo instanceof PDO)) {
+            return $cache = 0;
+        }
 
+        try {
             $uid = (int)$_SESSION['user_id'];
 
             $stmt = $pdo->prepare("
@@ -336,19 +350,16 @@ if (!function_exists('unreadChatCount')) {
                     ON cm.room_id = m.room_id
                     AND cm.user_id = ?
                 WHERE m.user_id != ?
-                    AND m.created_at >
-                    COALESCE(cm.last_read_at, '1970-01-01')
+                    AND m.created_at > COALESCE(cm.last_read_at, '1970-01-01')
             ");
 
             $stmt->execute([$uid, $uid]);
 
-            $cache = (int)$stmt->fetchColumn();
-
+            return $cache = (int)$stmt->fetchColumn();
         } catch (Throwable $e) {
-            $cache = 0;
+            // Tabel chat mungkin belum ada
+            return $cache = 0;
         }
-
-        return $cache;
     }
 }
 
@@ -358,8 +369,7 @@ if (!function_exists('unreadChatCount')) {
 if (!function_exists('csrfToken')) {
     function csrfToken(string $formKey = 'default'): string
     {
-        $key = 'csrf_' .
-            preg_replace('/[^a-z0-9_]/i', '', $formKey);
+        $key = 'csrf_' . preg_replace('/[^a-z0-9_]/i', '', $formKey);
 
         if (empty($_SESSION[$key])) {
             $_SESSION[$key] = bin2hex(random_bytes(32));
@@ -375,8 +385,7 @@ if (!function_exists('csrfToken')) {
 if (!function_exists('verifyCsrf')) {
     function verifyCsrf(string $formKey = 'default'): bool
     {
-        $key = 'csrf_' .
-            preg_replace('/[^a-z0-9_]/i', '', $formKey);
+        $key = 'csrf_' . preg_replace('/[^a-z0-9_]/i', '', $formKey);
 
         $token = $_POST['csrf'] ?? '';
 
@@ -400,37 +409,36 @@ if (!function_exists('validateImageUpload')) {
         array $file,
         int $maxBytes = 5242880
     ): array {
-
         $error = $file['error'] ?? UPLOAD_ERR_NO_FILE;
 
         if ($error !== UPLOAD_ERR_OK) {
             return [
-                'ok' => false,
-                'error' => 'File tidak ditemukan atau gagal diunggah.'
+                'ok'    => false,
+                'error' => 'File tidak ditemukan atau gagal diunggah.',
             ];
         }
 
-        $tmp = $file['tmp_name'] ?? '';
+        $tmp  = $file['tmp_name'] ?? '';
         $size = (int)($file['size'] ?? 0);
 
         if ($size <= 0 || $size > $maxBytes) {
             return [
-                'ok' => false,
-                'error' => 'Ukuran file kosong atau terlalu besar.'
+                'ok'    => false,
+                'error' => 'Ukuran file kosong atau terlalu besar.',
             ];
         }
 
         if (!is_uploaded_file($tmp)) {
             return [
-                'ok' => false,
-                'error' => 'File upload tidak valid.'
+                'ok'    => false,
+                'error' => 'File upload tidak valid.',
             ];
         }
 
         if (!function_exists('finfo_open')) {
             return [
-                'ok' => false,
-                'error' => 'Fitur pemeriksaan file tidak tersedia.'
+                'ok'    => false,
+                'error' => 'Fitur pemeriksaan file tidak tersedia.',
             ];
         }
 
@@ -438,8 +446,8 @@ if (!function_exists('validateImageUpload')) {
 
         if (!$finfo) {
             return [
-                'ok' => false,
-                'error' => 'Gagal memeriksa format gambar.'
+                'ok'    => false,
+                'error' => 'Gagal memeriksa format gambar.',
             ];
         }
 
@@ -448,28 +456,28 @@ if (!function_exists('validateImageUpload')) {
 
         $allowed = [
             'image/jpeg' => 'jpg',
-            'image/png' => 'png',
-            'image/webp' => 'webp'
+            'image/png'  => 'png',
+            'image/webp' => 'webp',
         ];
 
         if (!isset($allowed[$mime])) {
             return [
-                'ok' => false,
-                'error' => 'Format harus JPG, PNG, atau WEBP.'
+                'ok'    => false,
+                'error' => 'Format harus JPG, PNG, atau WEBP.',
             ];
         }
 
         if (@getimagesize($tmp) === false) {
             return [
-                'ok' => false,
-                'error' => 'File gambar rusak atau tidak valid.'
+                'ok'    => false,
+                'error' => 'File gambar rusak atau tidak valid.',
             ];
         }
 
         return [
-            'ok' => true,
-            'ext' => $allowed[$mime],
-            'mime' => $mime
+            'ok'   => true,
+            'ext'  => $allowed[$mime],
+            'mime' => $mime,
         ];
     }
 }

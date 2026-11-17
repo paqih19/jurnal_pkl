@@ -1,4 +1,3 @@
-
 <?php
 // ======================================================
 // API GEOCODE - JURNAL KERJA PKL
@@ -11,22 +10,16 @@ requireLogin();
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
 // ======================================================
 // KONFIGURASI
 // ======================================================
-
-$cacheDuration = 6 * 60 * 60; // Cache 6 jam
-$minimumInterval = 1.1;       // Jeda minimal request per sesi
-$cacheLimit = 40;
+$cacheDuration   = 6 * 60 * 60; // 6 jam
+$minimumInterval = 1.1;         // Jeda minimal antar-request per sesi
+$cacheLimit      = 40;
 
 // ======================================================
 // RESPONSE JSON
 // ======================================================
-
 function geoResponse(
     string $status,
     string $message = '',
@@ -37,86 +30,60 @@ function geoResponse(
 
     echo json_encode(
         array_merge([
-            'status' => $status,
-            'message' => $message,
-            'display_name' => ''
+            'status'       => $status,
+            'message'      => $message,
+            'display_name' => '',
         ], $data),
-        JSON_UNESCAPED_UNICODE |
-        JSON_UNESCAPED_SLASHES |
-        JSON_INVALID_UTF8_SUBSTITUTE
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
     );
 
     exit;
 }
 
 // ======================================================
-// VALIDASI METODE REQUEST
+// VALIDASI METODE
 // ======================================================
-
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
     header('Allow: GET');
-
-    geoResponse(
-        'error',
-        'Metode request tidak diizinkan.',
-        [],
-        405
-    );
+    geoResponse('error', 'Metode request tidak diizinkan.', [], 405);
 }
 
 // ======================================================
 // VALIDASI KOORDINAT
 // ======================================================
-
 $latInput = $_GET['lat'] ?? null;
 $lngInput = $_GET['lng'] ?? null;
 
 if (
-    !is_scalar($latInput) ||
-    !is_scalar($lngInput) ||
-    !is_numeric($latInput) ||
-    !is_numeric($lngInput)
+    !is_scalar($latInput) || !is_scalar($lngInput) ||
+    !is_numeric($latInput) || !is_numeric($lngInput)
 ) {
-    geoResponse(
-        'error',
-        'Koordinat tidak valid.',
-        [],
-        422
-    );
+    geoResponse('error', 'Koordinat tidak valid.', [], 422);
 }
 
 $lat = (float) $latInput;
 $lng = (float) $lngInput;
 
 if (
-    !is_finite($lat) ||
-    !is_finite($lng) ||
-    $lat < -90 ||
-    $lat > 90 ||
-    $lng < -180 ||
-    $lng > 180
+    !is_finite($lat) || !is_finite($lng) ||
+    $lat < -90 || $lat > 90 ||
+    $lng < -180 || $lng > 180
 ) {
-    geoResponse(
-        'error',
-        'Latitude atau longitude berada di luar batas.',
-        [],
-        422
-    );
+    geoResponse('error', 'Latitude atau longitude berada di luar batas.', [], 422);
 }
 
-// Presisi koordinat untuk cache
+// Presisi koordinat untuk cache (5 desimal ≈ 1.1 meter)
 $lat = round($lat, 5);
 $lng = round($lng, 5);
 
 // ======================================================
 // CACHE SESSION
 // ======================================================
-
 if (!isset($_SESSION['geo_cache']) || !is_array($_SESSION['geo_cache'])) {
     $_SESSION['geo_cache'] = [];
 }
 
-$now = time();
+$now      = time();
 $cacheKey = md5($lat . '|' . $lng);
 
 // Bersihkan cache kedaluwarsa
@@ -130,7 +97,7 @@ foreach ($_SESSION['geo_cache'] as $key => $item) {
     }
 }
 
-// Ambil cache jika tersedia
+// Ambil dari cache
 if (isset($_SESSION['geo_cache'][$cacheKey])) {
     $cached = $_SESSION['geo_cache'][$cacheKey];
 
@@ -142,12 +109,12 @@ if (isset($_SESSION['geo_cache'][$cacheKey])) {
 }
 
 // ======================================================
-// PEMBATASAN REQUEST
+// RATE LIMITING
 // ======================================================
-
 $lastRequest = (float) ($_SESSION['geo_last_request'] ?? 0);
+$nowMicro    = microtime(true);
 
-if (($now + microtime() - $lastRequest) < $minimumInterval) {
+if ($lastRequest > 0 && ($nowMicro - $lastRequest) < $minimumInterval) {
     geoResponse(
         'error',
         'Tunggu sebentar sebelum meminta lokasi berikutnya.',
@@ -156,59 +123,47 @@ if (($now + microtime() - $lastRequest) < $minimumInterval) {
     );
 }
 
-// Simpan waktu request
-$_SESSION['geo_last_request'] = microtime(true);
+$_SESSION['geo_last_request'] = $nowMicro;
 
 // ======================================================
-// REQUEST NOMINATIM
+// PERSIAPAN REQUEST NOMINATIM
 // ======================================================
-
 $params = http_build_query([
-    'format' => 'jsonv2',
-    'lat' => $lat,
-    'lon' => $lng,
+    'format'         => 'jsonv2',
+    'lat'            => $lat,
+    'lon'            => $lng,
     'addressdetails' => 1,
-    'accept-language' => 'id'
+    'accept-language' => 'id',
 ]);
 
 $url = 'https://nominatim.openstreetmap.org/reverse?' . $params;
 
-$appName = defined('APP_NAME') ? APP_NAME : 'JurnalPKL';
-
-$userAgent = preg_replace(
-    '/[^a-zA-Z0-9 ._-]/',
-    '',
-    $appName
-);
-
-$userAgent = trim($userAgent) ?: 'JurnalPKL';
-
+$appName   = defined('APP_NAME') ? APP_NAME : 'JurnalPKL';
+$userAgent = trim(preg_replace('/[^a-zA-Z0-9 ._-]/', '', $appName)) ?: 'JurnalPKL';
 $userAgent .= '/1.1';
 
 // ======================================================
-// EKSEKUSI CURL
+// EKSEKUSI REQUEST
 // ======================================================
-
 $response = false;
 $httpCode = 0;
 
 if (function_exists('curl_init')) {
-
     $ch = curl_init();
 
     curl_setopt_array($ch, [
-        CURLOPT_URL => $url,
+        CURLOPT_URL            => $url,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => false,
         CURLOPT_CONNECTTIMEOUT => 5,
-        CURLOPT_TIMEOUT => 10,
+        CURLOPT_TIMEOUT        => 10,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
-        CURLOPT_USERAGENT => $userAgent,
-        CURLOPT_HTTPHEADER => [
+        CURLOPT_USERAGENT      => $userAgent,
+        CURLOPT_HTTPHEADER     => [
             'Accept: application/json',
-            'Accept-Language: id'
-        ]
+            'Accept-Language: id',
+        ],
     ]);
 
     $response = curl_exec($ch);
@@ -219,34 +174,25 @@ if (function_exists('curl_init')) {
     }
 
     curl_close($ch);
-
-// ======================================================
-// FALLBACK STREAM CONTEXT
-// ======================================================
-
 } else {
-
+    // Fallback tanpa cURL
     $context = stream_context_create([
         'http' => [
-            'method' => 'GET',
-            'header' =>
+            'method'        => 'GET',
+            'header'        =>
                 "User-Agent: {$userAgent}\r\n" .
                 "Accept: application/json\r\n" .
                 "Accept-Language: id\r\n",
-            'timeout' => 10,
-            'ignore_errors' => true
+            'timeout'       => 10,
+            'ignore_errors' => true,
         ],
         'ssl' => [
-            'verify_peer' => true,
-            'verify_peer_name' => true
-        ]
+            'verify_peer'      => true,
+            'verify_peer_name' => true,
+        ],
     ]);
 
-    $response = @file_get_contents(
-        $url,
-        false,
-        $context
-    );
+    $response = @file_get_contents($url, false, $context);
 
     if (isset($http_response_header)) {
         foreach ($http_response_header as $header) {
@@ -258,16 +204,10 @@ if (function_exists('curl_init')) {
 }
 
 // ======================================================
-// PENANGANAN HASIL REQUEST
+// PENANGANAN HASIL
 // ======================================================
-
-if (
-    $response === false ||
-    $httpCode !== 200
-) {
-    error_log(
-        'Geocode request failed. HTTP status: ' . $httpCode
-    );
+if ($response === false || $httpCode !== 200) {
+    error_log('Geocode request failed. HTTP status: ' . $httpCode);
 
     geoResponse(
         'error',
@@ -279,10 +219,7 @@ if (
 
 $data = json_decode($response, true);
 
-if (
-    !is_array($data) ||
-    empty($data['display_name'])
-) {
+if (!is_array($data) || empty($data['display_name'])) {
     geoResponse(
         'error',
         'Alamat tidak ditemukan untuk koordinat tersebut.',
@@ -294,26 +231,22 @@ if (
 // ======================================================
 // FORMAT HASIL
 // ======================================================
-
 $result = [
     'display_name' => (string) $data['display_name'],
-    'lat' => $data['lat'] ?? (string) $lat,
-    'lon' => $data['lon'] ?? (string) $lng,
-    'address' => is_array($data['address'] ?? null)
-        ? $data['address']
-        : []
+    'lat'          => $data['lat'] ?? (string) $lat,
+    'lon'          => $data['lon'] ?? (string) $lng,
+    'address'      => is_array($data['address'] ?? null) ? $data['address'] : [],
 ];
 
 // ======================================================
 // SIMPAN CACHE
 // ======================================================
-
 $_SESSION['geo_cache'][$cacheKey] = [
-    'time' => time(),
-    'data' => $result
+    'time' => $now,
+    'data' => $result,
 ];
 
-// Batasi jumlah cache
+// Batasi jumlah cache — buang yang paling lama
 if (count($_SESSION['geo_cache']) > $cacheLimit) {
     uasort(
         $_SESSION['geo_cache'],
@@ -331,7 +264,6 @@ if (count($_SESSION['geo_cache']) > $cacheLimit) {
 // ======================================================
 // SELESAI
 // ======================================================
-
 geoResponse(
     'success',
     'Alamat berhasil ditemukan.',

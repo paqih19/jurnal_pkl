@@ -9,6 +9,11 @@ if (!defined('ROLE_PEMBIMBING')) {
     define('ROLE_PEMBIMBING', ['pembimbing', 'teacher', 'admin']);
 }
 
+// ================= SESSION TIMEOUT =================
+if (!defined('SESSION_TIMEOUT')) {
+    define('SESSION_TIMEOUT', 8 * 3600); // 8 jam
+}
+
 // ================= LOGIN =================
 function requireLogin(): void
 {
@@ -20,11 +25,23 @@ function requireLogin(): void
     // Logout otomatis setelah 8 jam tidak aktif
     $last = (int)($_SESSION['last_activity'] ?? 0);
 
-    if ($last > 0 && (time() - $last) > 8 * 3600) {
+    if ($last > 0 && (time() - $last) > SESSION_TIMEOUT) {
+        // Bersihkan session + cookie remember-me terkait
         $_SESSION = [];
 
         if (session_status() === PHP_SESSION_ACTIVE) {
             session_regenerate_id(true);
+        }
+
+        // Hapus cookie remember-me jika ada (karena sesi sudah tidak valid)
+        if (!empty($_COOKIE['remember_token'])) {
+            setcookie('remember_token', '', [
+                'expires'  => time() - 3600,
+                'path'     => '/',
+                'httponly' => true,
+                'secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+                'samesite' => 'Lax',
+            ]);
         }
 
         setFlash('error', 'Sesi berakhir karena tidak aktif. Silakan login kembali.');
@@ -89,7 +106,7 @@ function isPembimbing(): bool
 
 function isAdmin(): bool
 {
-    return hasRole('admin');
+    return ($_SESSION['role'] ?? '') === 'admin';
 }
 
 function isStudent(): bool
@@ -125,13 +142,10 @@ function tryRememberMe(PDO $pdo): void
         return;
     }
 
-    $raw = $_COOKIE['remember_token'];
+    $raw = (string) $_COOKIE['remember_token'];
 
     // Token harus berupa 64 karakter hexadecimal
-    if (
-        !is_string($raw) ||
-        !preg_match('/^[a-f0-9]{64}$/i', $raw)
-    ) {
+    if (!preg_match('/^[a-f0-9]{64}$/i', $raw)) {
         return;
     }
 
@@ -146,37 +160,56 @@ function tryRememberMe(PDO $pdo): void
         );
 
         $stmt->execute([$hashed]);
-        $user = $stmt->fetch();
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$user) {
+            // Token tidak cocok — hapus cookie
             setcookie('remember_token', '', [
-                'expires' => time() - 3600,
-                'path' => '/',
+                'expires'  => time() - 3600,
+                'path'     => '/',
                 'httponly' => true,
-                'secure' => !empty($_SERVER['HTTPS'])
-                    && $_SERVER['HTTPS'] !== 'off',
-                'samesite' => 'Lax'
+                'secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+                'samesite' => 'Lax',
             ]);
 
             return;
         }
 
+        // Cek status akun jika kolom tersedia
+        if (array_key_exists('status', $user)) {
+            $status = strtolower(trim((string)($user['status'] ?? 'aktif')));
+            $inactive = ['nonaktif', 'non-aktif', 'inactive', 'disabled', 'banned', '0'];
+
+            if (in_array($status, $inactive, true)) {
+                setcookie('remember_token', '', [
+                    'expires'  => time() - 3600,
+                    'path'     => '/',
+                    'httponly' => true,
+                    'secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+                    'samesite' => 'Lax',
+                ]);
+                return;
+            }
+        }
+
         // Perbarui ID session
         session_regenerate_id(true);
 
-        $_SESSION['user_id'] = (int)$user['id'];
-        $_SESSION['name'] = $user['name'];
-        $_SESSION['email'] = $user['email'];
-        $_SESSION['username'] = $user['username'];
-        $_SESSION['role'] = $user['role'];
-        $_SESSION['photo'] = $user['photo'] ?? null;
+        $_SESSION['user_id']       = (int) $user['id'];
+        $_SESSION['name']          = $user['name'] ?? '';
+        $_SESSION['email']         = $user['email'] ?? '';
+        $_SESSION['username']      = $user['username'] ?? '';
+        $_SESSION['role']          = $user['role'] ?? '';
+        $_SESSION['photo']         = $user['photo'] ?? null;
         $_SESSION['last_activity'] = time();
 
-        logActivity(
-            'login_remember',
-            'Login otomatis melalui remember-me',
-            (int)$user['id']
-        );
+        if (function_exists('logActivity')) {
+            logActivity(
+                'login_remember',
+                'Login otomatis melalui remember-me',
+                (int) $user['id']
+            );
+        }
 
     } catch (Throwable $e) {
         error_log('Remember Me Error: ' . $e->getMessage());

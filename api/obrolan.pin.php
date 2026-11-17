@@ -1,15 +1,11 @@
-
 <?php
 // api/obrolan_pin.php
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
 
 require_once __DIR__ . '/../config/db.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('X-Content-Type-Options: nosniff');
 
 function pinJsonResponse(
     string $status,
@@ -21,15 +17,21 @@ function pinJsonResponse(
 
     $response = [
         'status'  => $status,
-        'message' => $message
+        'message' => $message,
     ];
 
     if ($pinned !== null) {
         $response['pinned'] = $pinned;
     }
 
-    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+    echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
+}
+
+// Hanya POST
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    header('Allow: POST');
+    pinJsonResponse('error', 'Metode request tidak diizinkan.', null, 405);
 }
 
 // Login
@@ -37,32 +39,32 @@ if (empty($_SESSION['user_id'])) {
     pinJsonResponse('error', 'Silakan login terlebih dahulu.', null, 401);
 }
 
-// Hanya POST
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    pinJsonResponse('error', 'Metode request tidak diizinkan.', null, 405);
-}
-
 $uid = (int) $_SESSION['user_id'];
 
+if ($uid <= 0) {
+    pinJsonResponse('error', 'Sesi pengguna tidak valid.', null, 401);
+}
+
+// Baca input
 $input = json_decode(file_get_contents('php://input'), true);
 
 if (!is_array($input)) {
     pinJsonResponse('error', 'Data request tidak valid.', null, 400);
 }
 
-$messageId = filter_var(
-    $input['message_id'] ?? null,
-    FILTER_VALIDATE_INT
-);
+$messageId = filter_var($input['message_id'] ?? null, FILTER_VALIDATE_INT);
 
-if (!$messageId || $messageId <= 0) {
+if ($messageId === false || $messageId === null || $messageId <= 0) {
     pinJsonResponse('error', 'Pesan tidak valid.', null, 400);
 }
 
 try {
-    // Pastikan kolom is_pinned tersedia
-    $columns = $pdo->query("SHOW COLUMNS FROM messages")
-        ->fetchAll(PDO::FETCH_COLUMN);
+    // Cek kolom tabel (cache per request)
+    static $columns = null;
+
+    if ($columns === null) {
+        $columns = $pdo->query("SHOW COLUMNS FROM messages")->fetchAll(PDO::FETCH_COLUMN);
+    }
 
     if (!in_array('is_pinned', $columns, true)) {
         pinJsonResponse(
@@ -77,7 +79,7 @@ try {
 
     $pdo->beginTransaction();
 
-    // Pastikan pesan ada dan pengguna anggota ruang.
+    // Ambil pesan + verifikasi akses
     $sql = "
         SELECT m.id, m.room_id, m.is_pinned
         FROM messages m
@@ -88,15 +90,10 @@ try {
     ";
 
     if ($hasDeletedAt) {
-        $sql .= "
-            AND m.deleted_at IS NULL
-        ";
+        $sql .= " AND m.deleted_at IS NULL";
     }
 
-    $sql .= "
-        LIMIT 1
-        FOR UPDATE
-    ";
+    $sql .= " LIMIT 1 FOR UPDATE";
 
     $check = $pdo->prepare($sql);
     $check->execute([$messageId, $uid]);
@@ -105,38 +102,24 @@ try {
 
     if (!$message) {
         $pdo->rollBack();
-
-        pinJsonResponse(
-            'error',
-            'Pesan tidak ditemukan atau akses ditolak.',
-            null,
-            403
-        );
+        pinJsonResponse('error', 'Pesan tidak ditemukan atau akses ditolak.', null, 403);
     }
 
-    // Toggle status pin
+    // Toggle pin
     $newStatus = (int) $message['is_pinned'] === 1 ? 0 : 1;
 
-    $update = $pdo->prepare("
-        UPDATE messages
-        SET is_pinned = ?
-        WHERE id = ?
-    ");
-
+    $update = $pdo->prepare("UPDATE messages SET is_pinned = ? WHERE id = ?");
     $update->execute([$newStatus, $messageId]);
 
     $pdo->commit();
 
     pinJsonResponse(
         'success',
-        $newStatus
-            ? 'Pesan berhasil disematkan.'
-            : 'Sematan pesan berhasil dilepas.',
+        $newStatus ? 'Pesan berhasil disematkan.' : 'Sematan pesan berhasil dilepas.',
         (bool) $newStatus
     );
 
 } catch (Throwable $e) {
-
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }

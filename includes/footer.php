@@ -2,6 +2,13 @@
 // includes/footer.php
 
 $appName = defined('APP_NAME') ? APP_NAME : 'Jurnal PKL';
+
+// Fallback helper e()
+if (!function_exists('e')) {
+    function e($value): string {
+        return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+    }
+}
 ?>
 
     </main>
@@ -113,14 +120,14 @@ $appName = defined('APP_NAME') ? APP_NAME : 'Jurnal PKL';
     <!-- JAVASCRIPT FOOTER -->
     <script>
     (function () {
-
         const btn = document.getElementById('back-to-top');
 
         if (!btn) return;
 
-        // Tampilkan tombol setelah halaman digulir
-        function toggleBackToTop() {
+        // Throttle scroll listener untuk performa
+        let ticking = false;
 
+        function toggleBackToTop() {
             if (window.scrollY > 400) {
                 btn.classList.remove('hidden');
                 btn.classList.add('flex');
@@ -129,20 +136,24 @@ $appName = defined('APP_NAME') ? APP_NAME : 'Jurnal PKL';
                 btn.classList.remove('flex');
             }
 
+            ticking = false;
         }
 
-        window.addEventListener('scroll', toggleBackToTop, {
-            passive: true
-        });
+        function onScroll() {
+            if (!ticking) {
+                window.requestAnimationFrame(toggleBackToTop);
+                ticking = true;
+            }
+        }
+
+        window.addEventListener('scroll', onScroll, { passive: true });
 
         // Kembali ke bagian paling atas
         btn.addEventListener('click', function () {
-
             window.scrollTo({
                 top: 0,
                 behavior: 'smooth'
             });
-
         });
 
         // Periksa posisi awal halaman
